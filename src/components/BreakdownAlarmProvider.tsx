@@ -22,31 +22,48 @@ const BreakdownAlarmContext = createContext<BreakdownAlarmContextType>({
 
 export const useBreakdownAlarm = () => useContext(BreakdownAlarmContext);
 
-// Web Audio API High-Volume Siren Beep Generator
+// Dual-Oscillator Piercing Siren Synthesizer (Maximum Volume Loudness)
 function playSirenBeep(audioCtx: AudioContext) {
   try {
     if (audioCtx.state === 'suspended') {
       void audioCtx.resume();
     }
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
 
-    osc.type = 'sawtooth';
     const now = audioCtx.currentTime;
 
-    // Siren frequency sweep: 950Hz -> 500Hz
-    osc.frequency.setValueAtTime(950, now);
-    osc.frequency.exponentialRampToValueAtTime(500, now + 0.4);
+    // Primary High-Loudness Square Wave Oscillator (Piercing Siren)
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
 
-    // High volume gain (0.75) for maximum clarity and loudness
-    gain.gain.setValueAtTime(0.75, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+    osc1.type = 'square';
+    osc1.frequency.setValueAtTime(1200, now);
+    osc1.frequency.exponentialRampToValueAtTime(650, now + 0.45);
 
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    gain1.gain.setValueAtTime(0.85, now); // 85% Volume
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
 
-    osc.start(now);
-    osc.stop(now + 0.48);
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+
+    // Harmonic Sawtooth Wave Oscillator (Police Siren Sweep)
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(1500, now);
+    osc2.frequency.exponentialRampToValueAtTime(800, now + 0.45);
+
+    gain2.gain.setValueAtTime(0.5, now);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+
+    osc1.stop(now + 0.52);
+    osc2.stop(now + 0.52);
   } catch (err) {
     console.warn('Audio Context play error:', err);
   }
