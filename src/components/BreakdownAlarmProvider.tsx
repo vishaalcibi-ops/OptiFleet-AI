@@ -190,6 +190,13 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
       )
       .on(
         'postgres_changes',
+        { event: '*', schema: 'public', table: 'shipments' },
+        () => {
+          void fetchData();
+        }
+      )
+      .on(
+        'postgres_changes',
         { event: '*', schema: 'public', table: 'lorries' },
         (payload) => {
           const newRow = payload.new as Lorry | undefined;

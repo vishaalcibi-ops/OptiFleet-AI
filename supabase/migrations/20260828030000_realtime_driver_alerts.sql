@@ -1,6 +1,6 @@
 -- Migration 20260828030000_realtime_driver_alerts.sql
 
--- A1. Add driver_alerts table to supabase_realtime publication
+-- Enable supabase_realtime for driver_alerts, shipments, and lorries
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -8,6 +8,20 @@ BEGIN
     WHERE pubname = 'supabase_realtime' AND tablename = 'driver_alerts'
   ) THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE driver_alerts;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'shipments'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE shipments;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'lorries'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE lorries;
   END IF;
 END $$;
 
