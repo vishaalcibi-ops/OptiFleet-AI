@@ -204,8 +204,8 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         if (alertsRes.data) {
           setActiveAlerts((prev) => {
             const fresh = alertsRes.data as DriverAlert[];
-            // If new alert found, trigger sound
-            if (fresh.length > prev.length) {
+            const hasNew = fresh.some((fa) => !prev.some((pa) => pa.id === fa.id));
+            if (hasNew || (prev.length === 0 && fresh.length > 0)) {
               playSirenBeep();
               void fetchData();
             }
@@ -216,7 +216,8 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         if (lorriesRes.data) {
           setBreakdownLorries((prev) => {
             const freshLorries = lorriesRes.data as Lorry[];
-            if (freshLorries.length > prev.length) {
+            const hasNew = freshLorries.some((fl) => !prev.some((pl) => pl.lorry_id === fl.lorry_id));
+            if (hasNew || (prev.length === 0 && freshLorries.length > 0)) {
               playSirenBeep();
               void fetchData();
             }
