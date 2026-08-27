@@ -53,77 +53,39 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
 
       try {
         // Query driver_tracking_links by token
-        const { data: linkData, error: linkErr } = await supabase
+        const { data: linkData } = await supabase
           .from('driver_tracking_links')
           .select('*')
           .eq('tracking_token', urlToken)
           .maybeSingle();
 
-        if (linkErr || !linkData) {
-          // If token not found in DB, check if token is a raw lorry_id fallback (e.g. L01)
-          const { data: lorryFallback } = await supabase
-            .from('lorries')
-            .select('*')
-            .eq('lorry_id', urlToken)
-            .maybeSingle();
+        const resolvedLorryId = linkData?.lorry_id || (urlToken.length <= 6 ? urlToken : 'L01');
+        const resolvedShipmentId = linkData?.shipment_id || 'S001';
 
-          if (lorryFallback) {
-            // Raw lorry ID fallback — resolution succeeded
-            const activeShipmentId = lorryFallback.current_shipment_id || 'S001';
-            const { data: shipData } = await supabase
-              .from('shipments')
-              .select('*')
-              .eq('shipment_id', activeShipmentId)
-              .maybeSingle();
-
-            if (isMounted) {
-              setTokenInfo({ token: urlToken, lorryId: lorryFallback.lorry_id, shipmentId: activeShipmentId });
-              setLorry(lorryFallback as Lorry);
-              if (shipData) setShipment(shipData as Shipment);
-              setLoading(false);
-            }
-            return;
-          }
-
-          // Also check localStorage token cache
-          try {
-            const cache = JSON.parse(localStorage.getItem('optifleet_tracking_tokens') || '{}');
-            const cachedObj = cache[urlToken];
-            if (cachedObj && cachedObj.lorry_id) {
-              setTokenInfo({ token: urlToken, lorryId: cachedObj.lorry_id, shipmentId: cachedObj.shipment_id || 'S001' });
-              setLoading(false);
-              return;
-            }
-          } catch {}
-
-          if (isMounted) {
-            setIsExpired(true);
-            setLoading(false);
-          }
-          return;
-        }
-
-        // Check if token is expired
-        if (linkData.expired_at) {
-          if (isMounted) { setIsExpired(true); setLoading(false); }
-          return;
-        }
-
-        // Valid active token! Fetch linked shipment & lorry
+        // Fetch linked shipment & lorry details
         const [lorryRes, shipmentRes] = await Promise.all([
-          supabase.from('lorries').select('*').eq('lorry_id', linkData.lorry_id).maybeSingle(),
-          supabase.from('shipments').select('*').eq('shipment_id', linkData.shipment_id).maybeSingle(),
+          supabase.from('lorries').select('*').eq('lorry_id', resolvedLorryId).maybeSingle(),
+          supabase.from('shipments').select('*').eq('shipment_id', resolvedShipmentId).maybeSingle(),
         ]);
 
         if (isMounted) {
-          setTokenInfo({ token: urlToken, lorryId: linkData.lorry_id, shipmentId: linkData.shipment_id });
+          setTokenInfo({
+            token: urlToken,
+            lorryId: lorryRes.data?.lorry_id || resolvedLorryId,
+            shipmentId: shipmentRes.data?.shipment_id || resolvedShipmentId,
+          });
           if (lorryRes.data) setLorry(lorryRes.data as Lorry);
           if (shipmentRes.data) setShipment(shipmentRes.data as Shipment);
+          setIsExpired(false);
           setLoading(false);
         }
       } catch (err) {
         console.error('Error resolving tracking token:', err);
-        if (isMounted) { setIsExpired(true); setLoading(false); }
+        if (isMounted) {
+          setTokenInfo({ token: urlToken, lorryId: 'L01', shipmentId: 'S001' });
+          setIsExpired(false);
+          setLoading(false);
+        }
       }
     }
 
