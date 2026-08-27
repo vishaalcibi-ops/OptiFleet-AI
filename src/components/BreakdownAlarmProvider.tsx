@@ -26,6 +26,53 @@ const BreakdownAlarmContext = createContext<BreakdownAlarmContextType>({
 
 export const useBreakdownAlarm = () => useContext(BreakdownAlarmContext);
 
+// Generate loud emergency PCM WAV audio data URI (100% hardware audio compatibility)
+let cachedSirenWavUri: string | null = null;
+
+function getSirenWavUri(): string {
+  if (cachedSirenWavUri) return cachedSirenWavUri;
+  const sampleRate = 22050;
+  const duration = 0.6; // 0.6 second siren pulse
+  const numSamples = Math.floor(sampleRate * duration);
+  const buffer = new Uint8Array(44 + numSamples);
+  const view = new DataView(buffer.buffer);
+
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      buffer[offset + i] = string.charCodeAt(i);
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  writeString(36, 'data');
+  view.setUint32(40, numSamples, true);
+
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    const freq = 1400 - (700 * (t / duration));
+    const angle = 2 * Math.PI * freq * t;
+    const sample = Math.sin(angle) > 0 ? 240 : 15;
+    buffer[44 + i] = sample;
+  }
+
+  let binary = '';
+  for (let i = 0; i < buffer.length; i++) {
+    binary += String.fromCharCode(buffer[i]);
+  }
+  cachedSirenWavUri = 'data:audio/wav;base64,' + btoa(binary);
+  return cachedSirenWavUri;
+}
+
 // Global persistent audio context reference unlocked by user click
 let globalAudioCtx: AudioContext | null = null;
 
@@ -42,8 +89,19 @@ function getOrCreateAudioContext(): AudioContext | null {
   return globalAudioCtx;
 }
 
-// Dual-Oscillator Loud Triple-Pulse Piercing Siren Synthesizer
+// Dual Engine Alarm Synthesizer: HTML5 Audio + Web Audio API simultaneously
 function playSirenBeep() {
+  // Engine 1: HTML5 Audio element
+  try {
+    const wavUri = getSirenWavUri();
+    const audio = new Audio(wavUri);
+    audio.volume = 1.0;
+    void audio.play().catch((e) => console.warn('HTML5 audio play catch:', e));
+  } catch (err) {
+    console.warn('HTML5 Audio error:', err);
+  }
+
+  // Engine 2: Web Audio API Oscillator
   try {
     const ctx = getOrCreateAudioContext();
     if (!ctx) return;
@@ -51,7 +109,7 @@ function playSirenBeep() {
       void ctx.resume();
     }
 
-    const pulses = [0, 0.25, 0.5]; // 3 rapid loud siren pulses
+    const pulses = [0, 0.25];
     pulses.forEach((delay) => {
       const now = ctx.currentTime + delay;
 
@@ -60,7 +118,7 @@ function playSirenBeep() {
       osc1.type = 'square';
       osc1.frequency.setValueAtTime(1400, now);
       osc1.frequency.exponentialRampToValueAtTime(700, now + 0.2);
-      gain1.gain.setValueAtTime(1.0, now); // Maximum 100% Volume
+      gain1.gain.setValueAtTime(1.0, now);
       gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
       osc1.connect(gain1);
       gain1.connect(ctx.destination);
@@ -81,7 +139,7 @@ function playSirenBeep() {
       osc2.stop(now + 0.23);
     });
   } catch (err) {
-    console.warn('Alarm audio blocked:', err);
+    console.warn('Alarm Web Audio blocked:', err);
   }
 }
 
