@@ -174,6 +174,13 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
         ]);
       }
 
+      // Broadcast breakdown alert to all open dashboard tabs instantly
+      try {
+        const bc = new BroadcastChannel('optifleet_alerts_channel');
+        bc.postMessage({ type: 'BREAKDOWN', lorryId: tokenInfo.lorryId, shipmentId: tokenInfo.shipmentId });
+        bc.close();
+      } catch {}
+
       setActionDone('breakdown');
       setShowBreakdownConfirm(false);
     } catch (err) {

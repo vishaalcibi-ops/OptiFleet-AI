@@ -179,11 +179,22 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Synchronize breakdown lorries from store
+  // Synchronize breakdown lorries from store & listen to cross-tab BroadcastChannel
   useEffect(() => {
     const initialBreakdowns = lorries.filter((l) => Boolean(l.is_breakdown) || l.status === 'maintenance');
     setBreakdownLorries(initialBreakdowns);
-  }, [lorries]);
+
+    try {
+      const bc = new BroadcastChannel('optifleet_alerts_channel');
+      bc.onmessage = (event) => {
+        if (event.data?.type === 'BREAKDOWN') {
+          playSirenBeep();
+          void fetchData();
+        }
+      };
+      return () => bc.close();
+    } catch {}
+  }, [lorries, fetchData]);
 
   // A2. Global Realtime subscription to driver_alerts & lorries (with duplicate subscribe check)
   useEffect(() => {
