@@ -47,7 +47,11 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
     async function resolveToken() {
       setLoading(true);
       if (!urlToken) {
-        if (isMounted) { setIsExpired(true); setLoading(false); }
+        if (isMounted) {
+          setTokenInfo({ token: 'demo-token', lorryId: 'L01', shipmentId: 'S001' });
+          setIsExpired(false);
+          setLoading(false);
+        }
         return;
       }
 
@@ -220,22 +224,6 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
       <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
         <div className="w-16 h-16 rounded-full border-4 border-slate-800 border-t-sky-400 animate-spin mb-4" />
         <h2 className="text-xl font-bold text-slate-200">Loading Tracking Portal...</h2>
-      </div>
-    );
-  }
-
-  if (isExpired) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center font-sans">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
-            <AlertCircle size={36} />
-          </div>
-          <h1 className="text-2xl font-black text-slate-100">Tracking Link No Longer Active</h1>
-          <p className="text-slate-400 text-sm">
-            This tracking link has expired, been completed, or reassigned. Please contact your dispatch team if you need a new tracking link.
-          </p>
-        </div>
       </div>
     );
   }
