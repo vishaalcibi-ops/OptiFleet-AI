@@ -161,9 +161,14 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
       try {
         audioRef.current.currentTime = 0;
         audioRef.current.volume = 1.0;
-        void audioRef.current.play().catch((err) => console.warn('DOM audio play error:', err));
+        const promise = audioRef.current.play();
+        if (promise !== undefined) {
+          promise
+            .then(() => console.log('audio played OK'))
+            .catch((err) => console.warn('audio play blocked:', err));
+        }
       } catch (err) {
-        console.warn('DOM Audio catch:', err);
+        console.warn('audio play blocked:', err);
       }
     }
 
@@ -216,7 +221,8 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
       const bc = new BroadcastChannel('optifleet_alerts_channel');
       bc.onmessage = (event) => {
         if (event.data?.type === 'BREAKDOWN') {
-          playSirenBeep();
+          console.log('BroadcastChannel alert fired', event.data);
+          triggerSirenSound();
           void fetchData();
         }
       };
@@ -245,7 +251,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
             const fresh = alertsRes.data as DriverAlert[];
             const hasNew = fresh.some((fa) => !prev.some((pa) => pa.id === fa.id));
             if (hasNew || (prev.length === 0 && fresh.length > 0)) {
-              playSirenBeep();
+              triggerSirenSound();
               void fetchData();
             }
             return fresh;
@@ -257,7 +263,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
             const freshLorries = lorriesRes.data as Lorry[];
             const hasNew = freshLorries.some((fl) => !prev.some((pl) => pl.lorry_id === fl.lorry_id));
             if (hasNew || (prev.length === 0 && freshLorries.length > 0)) {
-              playSirenBeep();
+              triggerSirenSound();
               void fetchData();
             }
             return freshLorries;
@@ -278,11 +284,12 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'driver_alerts' },
         (payload) => {
+          console.log('driver_alerts subscription fired', payload);
           const newAlert = payload.new as DriverAlert;
           if (newAlert) {
             setActiveAlerts((prev) => [newAlert, ...prev.filter((a) => a.id !== newAlert.id)]);
             void fetchData();
-            playSirenBeep();
+            triggerSirenSound();
           }
         }
       )
@@ -308,7 +315,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
                 updated[existingIndex] = { ...updated[existingIndex], ...newRow };
                 return updated;
               }
-              playSirenBeep();
+              triggerSirenSound();
               return [newRow, ...prev];
             } else {
               return prev.filter((l) => l.lorry_id !== newRow.lorry_id);

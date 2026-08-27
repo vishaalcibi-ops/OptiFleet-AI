@@ -13,3 +13,7 @@ export const supabase = createClient(url, key, {
 });
 
 export const supabaseConfigured = Boolean(supabaseUrl?.trim() && supabaseAnonKey?.trim());
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { supabase: typeof supabase }).supabase = supabase;
+}
