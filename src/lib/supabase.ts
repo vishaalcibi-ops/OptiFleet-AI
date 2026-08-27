@@ -12,7 +12,11 @@ export const supabase = createClient(url, key, {
   auth: { persistSession: false },
 });
 
-export const supabaseConfigured = Boolean(supabaseUrl?.trim() && supabaseAnonKey?.trim());
+export const supabaseConfigured = Boolean(
+  supabaseUrl?.trim() &&
+  supabaseAnonKey?.trim() &&
+  !supabaseUrl.includes('placeholder.supabase.co')
+);
 
 if (typeof window !== 'undefined') {
   (window as unknown as { supabase: typeof supabase }).supabase = supabase;

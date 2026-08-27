@@ -10,11 +10,19 @@ import type {
   RejectionReason,
   AuditLogRow,
 } from '@/types';
-import { supabase } from '@/lib/supabase';
+import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { optimize, computeBeforeSummary } from '@/lib/optimizer';
 import { lsGet, lsSet } from '@/lib/localStorage';
 
 // ─── Default seed data (used when Supabase is unreachable and localStorage is empty) ───
+
+const DEFAULT_LOCATIONS: Location[] = [
+  { id: 'loc1', name: 'Kangeyam', latitude: 11.0, longitude: 77.56, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc2', name: 'Tiruppur', latitude: 11.11, longitude: 77.23, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc3', name: 'Coimbatore', latitude: 11.0, longitude: 76.96, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc4', name: 'Erode', latitude: 11.34, longitude: 77.73, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'loc5', name: 'Salem', latitude: 11.66, longitude: 78.14, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+];
 
 const DEFAULT_SETTINGS: OptimizationSettings = {
   id: 1, average_speed_kmh: 50, loading_time_minutes: 30, unloading_time_minutes: 30,
@@ -240,6 +248,20 @@ export const useStore = create<AppState>((set, get) => ({
 
   fetchData: async () => {
     set({ loading: true, error: null });
+
+    if (!supabaseConfigured) {
+      const rawShipments = DEFAULT_SHIPMENTS.map(normaliseShipment);
+      const rawLorries = DEFAULT_LORRIES.map((l) => normaliseLorry(l, rawShipments));
+      set({
+        lorries: rawLorries,
+        shipments: rawShipments,
+        locations: DEFAULT_LOCATIONS,
+        settings: DEFAULT_SETTINGS,
+        loading: false,
+      });
+      return;
+    }
+
     try {
       const [lorriesRes, shipmentsRes, settingsRes, locationsRes, assignmentsRes] = await Promise.all([
         supabase.from('lorries').select('*').order('lorry_id'),

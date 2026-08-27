@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { AlertOctagon, Volume2, CheckCircle2 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { useStore } from '@/lib/store';
 import type { Lorry, DriverAlert } from '@/types';
 
@@ -193,6 +193,11 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
 
   // A2. Global Realtime subscription to driver_alerts & lorries (with duplicate subscribe check)
   useEffect(() => {
+    if (!supabaseConfigured) {
+      console.log('Supabase not configured or using placeholder; using local BroadcastChannel fallback for alarms.');
+      return;
+    }
+
     if (hasSubscribedRef.current) {
       console.warn('BreakdownAlarmProvider: Duplicate realtime subscription attempt blocked.');
       return;
