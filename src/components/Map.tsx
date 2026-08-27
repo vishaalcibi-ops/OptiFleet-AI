@@ -198,7 +198,36 @@ export function Map({ lorries, shipments, plans, latestAssignmentRoutes = [] }: 
 
                 <p className="text-xs"><strong>Location:</strong> {lorry.current_location_name}</p>
                 {lorry.assignment_status === 'assigned' && lorry.current_shipment_id && (
-                  <p className="text-xs"><strong>Shipment:</strong> {lorry.current_shipment_id}</p>
+                  <>
+                    <p className="text-xs"><strong>Shipment:</strong> {lorry.current_shipment_id}</p>
+                    {(() => {
+                      const linkedShipment = shipments.find((s) => s.shipment_id === lorry.current_shipment_id);
+                      if (isGpsRecent && linkedShipment && lorry.last_gps_latitude != null && lorry.last_gps_longitude != null) {
+                        const R = 6371;
+                        const toRad = (deg: number) => (deg * Math.PI) / 180;
+                        const pLat = linkedShipment.pickup_latitude, pLng = linkedShipment.pickup_longitude;
+                        const cLat = lorry.last_gps_latitude, cLng = lorry.last_gps_longitude;
+                        const dLat = linkedShipment.destination_latitude, dLng = linkedShipment.destination_longitude;
+
+                        const dist = (la1: number, lo1: number, la2: number, lo2: number) => {
+                          const d1 = toRad(la2 - la1), d2 = toRad(lo2 - lo1);
+                          const a = Math.sin(d1 / 2) ** 2 + Math.cos(toRad(la1)) * Math.cos(toRad(la2)) * Math.sin(d2 / 2) ** 2;
+                          return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                        };
+
+                        const covered = dist(pLat, pLng, cLat, cLng);
+                        const remaining = dist(cLat, cLng, dLat, dLng);
+                        const total = covered + remaining;
+                        const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((covered / total) * 100))) : 0;
+                        return (
+                          <p className="text-xs text-indigo-600 font-semibold mt-1">
+                            🚀 ~{pct}% of route (straight-line estimate)
+                          </p>
+                        );
+                      }
+                      return <p className="text-xs text-gray-400 mt-1">Live position unavailable</p>;
+                    })()}
+                  </>
                 )}
                 {lorry.speed_kmh != null && <p className="text-xs"><strong>Speed:</strong> {Math.round(lorry.speed_kmh)} km/h</p>}
                 <p className="text-xs">
