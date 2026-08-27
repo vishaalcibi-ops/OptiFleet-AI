@@ -171,6 +171,8 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const lastSeenAlertTimeRef = useRef<number>(0);
+
   // Synchronize breakdown lorries from store & listen to cross-tab BroadcastChannel
   useEffect(() => {
     const initialBreakdowns = lorries.filter((l) => Boolean(l.is_breakdown) || l.status === 'maintenance');
@@ -206,27 +208,27 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         ]);
 
         if (alertsRes.data) {
-          setActiveAlerts((prev) => {
-            const fresh = alertsRes.data as DriverAlert[];
-            const hasNew = fresh.some((fa) => !prev.some((pa) => pa.id === fa.id));
-            if (hasNew || (prev.length === 0 && fresh.length > 0)) {
+          const freshAlerts = alertsRes.data as DriverAlert[];
+          setActiveAlerts(freshAlerts);
+
+          const maxTime = freshAlerts.reduce((max, a) => {
+            const t = new Date(a.created_at || 0).getTime();
+            return t > max ? t : max;
+          }, 0);
+
+          if (maxTime > 0 && maxTime > lastSeenAlertTimeRef.current) {
+            if (lastSeenAlertTimeRef.current > 0) {
               triggerSirenSound();
               void fetchData();
             }
-            return fresh;
-          });
+            lastSeenAlertTimeRef.current = maxTime;
+          } else if (lastSeenAlertTimeRef.current === 0 && freshAlerts.length > 0) {
+            lastSeenAlertTimeRef.current = maxTime || Date.now();
+          }
         }
 
         if (lorriesRes.data) {
-          setBreakdownLorries((prev) => {
-            const freshLorries = lorriesRes.data as Lorry[];
-            const hasNew = freshLorries.some((fl) => !prev.some((pl) => pl.lorry_id === fl.lorry_id));
-            if (hasNew || (prev.length === 0 && freshLorries.length > 0)) {
-              triggerSirenSound();
-              void fetchData();
-            }
-            return freshLorries;
-          });
+          setBreakdownLorries(lorriesRes.data as Lorry[]);
         }
       } catch (err) {
         console.warn('Breakdown polling error:', err);
@@ -239,17 +241,18 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
 
     const channel = supabase
       .channel('global-driver-alerts-realtime')
+      .on('broadcast', { event: 'breakdown' }, (payload) => {
+        console.log('Realtime broadcast breakdown received:', payload);
+        triggerSirenSound();
+        void fetchData();
+      })
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'driver_alerts' },
+        { event: '*', schema: 'public', table: 'driver_alerts' },
         (payload) => {
-          console.log('driver_alerts subscription fired', payload);
-          const newAlert = payload.new as DriverAlert;
-          if (newAlert) {
-            setActiveAlerts((prev) => [newAlert, ...prev.filter((a) => a.id !== newAlert.id)]);
-            void fetchData();
-            triggerSirenSound();
-          }
+          console.log('driver_alerts postgres_changes fired:', payload);
+          triggerSirenSound();
+          void fetchData();
         }
       )
       .on(
@@ -263,23 +266,11 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'lorries' },
         (payload) => {
+          console.log('lorries postgres_changes fired:', payload);
           const newRow = payload.new as Lorry | undefined;
-          if (!newRow || !newRow.lorry_id) return;
-
-          setBreakdownLorries((prev) => {
-            if (newRow.is_breakdown || newRow.status === 'maintenance') {
-              const existingIndex = prev.findIndex((l) => l.lorry_id === newRow.lorry_id);
-              if (existingIndex >= 0) {
-                const updated = [...prev];
-                updated[existingIndex] = { ...updated[existingIndex], ...newRow };
-                return updated;
-              }
-              triggerSirenSound();
-              return [newRow, ...prev];
-            } else {
-              return prev.filter((l) => l.lorry_id !== newRow.lorry_id);
-            }
-          });
+          if (newRow?.is_breakdown || newRow?.status === 'maintenance') {
+            triggerSirenSound();
+          }
           void fetchData();
         }
       )

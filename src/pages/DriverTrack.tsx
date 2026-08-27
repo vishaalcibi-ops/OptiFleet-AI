@@ -174,11 +174,20 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
         ]);
       }
 
-      // Broadcast breakdown alert to all open dashboard tabs instantly
+      // Broadcast breakdown alert over Supabase Realtime & BroadcastChannel
       try {
         const bc = new BroadcastChannel('optifleet_alerts_channel');
         bc.postMessage({ type: 'BREAKDOWN', lorryId: tokenInfo.lorryId, shipmentId: tokenInfo.shipmentId });
         bc.close();
+      } catch {}
+
+      try {
+        const rtChannel = supabase.channel('global-driver-alerts-realtime');
+        void rtChannel.send({
+          type: 'broadcast',
+          event: 'breakdown',
+          payload: { lorryId: tokenInfo.lorryId, shipmentId: tokenInfo.shipmentId },
+        });
       } catch {}
 
       setActionDone('breakdown');
