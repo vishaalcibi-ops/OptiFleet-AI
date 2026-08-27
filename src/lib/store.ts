@@ -1044,47 +1044,49 @@ export const useStore = create<AppState>((set, get) => ({
         });
 
         // Try Supabase in background — best effort
-        try {
-          const { data: runData, error: runError } = await supabase.from('optimization_runs').insert({
-            total_cost: result.total_cost, total_distance_km: result.total_distance_km, total_fuel_litres: result.total_fuel_litres,
-            assigned_shipments: result.assigned_count, unassigned_shipments: result.unassigned_count, status: 'completed',
-            input_summary: { lorries: lorries.length, shipments: workShipments.length }, before_summary: beforeSummary,
-          }).select().maybeSingle();
+        if (supabaseConfigured) {
+          try {
+            const { data: runData, error: runError } = await supabase.from('optimization_runs').insert({
+              total_cost: result.total_cost, total_distance_km: result.total_distance_km, total_fuel_litres: result.total_fuel_litres,
+              assigned_shipments: result.assigned_count, unassigned_shipments: result.unassigned_count, status: 'completed',
+              input_summary: { lorries: lorries.length, shipments: workShipments.length }, before_summary: beforeSummary,
+            }).select().maybeSingle();
 
-          if (!runError && runData) {
-            const dbRunId = (runData as OptimizationRun).id;
-            result.run_id = dbRunId;
-            const dbAssignRows = assignmentRows.map(({ id: _id, ...rest }) => ({ ...rest, optimization_run_id: dbRunId }));
-            const dbRejectRows = rejectionRows.map(({ id: _id, ...rest }) => ({ ...rest, optimization_run_id: dbRunId }));
-            if (dbAssignRows.length) await supabase.from('assignments').insert(dbAssignRows);
-            if (dbRejectRows.length) await supabase.from('rejection_reasons').insert(dbRejectRows);
-            const now2 = new Date().toISOString();
-            const usedLorryIds = new Set(result.plans.map((p) => p.lorry.lorry_id));
+            if (!runError && runData) {
+              const dbRunId = (runData as OptimizationRun).id;
+              result.run_id = dbRunId;
+              const dbAssignRows = assignmentRows.map(({ id: _id, ...rest }) => ({ ...rest, optimization_run_id: dbRunId }));
+              const dbRejectRows = rejectionRows.map(({ id: _id, ...rest }) => ({ ...rest, optimization_run_id: dbRunId }));
+              if (dbAssignRows.length) await supabase.from('assignments').insert(dbAssignRows);
+              if (dbRejectRows.length) await supabase.from('rejection_reasons').insert(dbRejectRows);
+              const now2 = new Date().toISOString();
+              const usedLorryIds = new Set(result.plans.map((p) => p.lorry.lorry_id));
 
-            for (const plan of result.plans) {
-              const isFirstSplit = !plan.is_split || plan.split_index === 1;
-              for (const ps of plan.sequence) {
-                if (isFirstSplit || !plan.is_split) {
-                  await supabase.from('shipments').update({ shipment_status: 'active', status: 'assigned', assigned_lorry_id: plan.lorry.lorry_id, assigned_driver_name: plan.lorry.driver_name ?? null, updated_at: now2 }).eq('shipment_id', ps.shipment.shipment_id);
+              for (const plan of result.plans) {
+                const isFirstSplit = !plan.is_split || plan.split_index === 1;
+                for (const ps of plan.sequence) {
+                  if (isFirstSplit || !plan.is_split) {
+                    await supabase.from('shipments').update({ shipment_status: 'active', status: 'assigned', assigned_lorry_id: plan.lorry.lorry_id, assigned_driver_name: plan.lorry.driver_name ?? null, updated_at: now2 }).eq('shipment_id', ps.shipment.shipment_id);
+                  }
+                  await supabase.from('lorries').update({ assignment_status: 'assigned', current_shipment_id: ps.shipment.shipment_id, updated_at: now2 }).eq('lorry_id', plan.lorry.lorry_id);
+                  // Mint a fresh tracking token per active assignment
+                  void generateAssignmentToken(plan.lorry.lorry_id, ps.shipment.shipment_id);
                 }
-                await supabase.from('lorries').update({ assignment_status: 'assigned', current_shipment_id: ps.shipment.shipment_id, updated_at: now2 }).eq('lorry_id', plan.lorry.lorry_id);
-                // Mint a fresh tracking token per active assignment
-                void generateAssignmentToken(plan.lorry.lorry_id, ps.shipment.shipment_id);
               }
-            }
 
-            for (const u of result.unassigned) {
-              await supabase.from('shipments').update({ shipment_status: 'unassigned', status: 'unassigned', assigned_lorry_id: null, assigned_driver_name: null, updated_at: now2 }).eq('shipment_id', u.shipment.shipment_id);
+              for (const u of result.unassigned) {
+                await supabase.from('shipments').update({ shipment_status: 'unassigned', status: 'unassigned', assigned_lorry_id: null, assigned_driver_name: null, updated_at: now2 }).eq('shipment_id', u.shipment.shipment_id);
+              }
+              
+              void logAudit('optimization', dbRunId, 'run_completed', null, {
+                assigned: result.assigned_count,
+                unassigned: result.unassigned_count,
+                total_distance: result.total_distance_km
+              }, `Optimization run completed. Assigned: ${result.assigned_count}, Unassigned: ${result.unassigned_count}`);
             }
-            
-            void logAudit('optimization', dbRunId, 'run_completed', null, {
-              assigned: result.assigned_count,
-              unassigned: result.unassigned_count,
-              total_distance: result.total_distance_km
-            }, `Optimization run completed. Assigned: ${result.assigned_count}, Unassigned: ${result.unassigned_count}`);
+          } catch {
+            // Supabase unavailable — local run already saved
           }
-        } catch {
-          // Supabase unavailable — local run already saved
         }
       }
 
@@ -1101,14 +1103,16 @@ export const useStore = create<AppState>((set, get) => ({
     const localRuns = get().runs;
     if (localRuns.length > 0) set({ runs: localRuns });
 
-    try {
-      const { data, error } = await supabase.from('optimization_runs').select('*').order('created_at', { ascending: false }).limit(20);
-      if (error) throw error;
-      const runs = data || [];
-      set({ runs });
-      lsSet('runs', runs);
-    } catch {
-      // Use local runs already loaded
+    if (supabaseConfigured) {
+      try {
+        const { data, error } = await supabase.from('optimization_runs').select('*').order('created_at', { ascending: false }).limit(20);
+        if (error) throw error;
+        const runs = data || [];
+        set({ runs });
+        lsSet('runs', runs);
+      } catch {
+        // Use local runs already loaded
+      }
     }
   },
 
@@ -1122,20 +1126,25 @@ export const useStore = create<AppState>((set, get) => ({
       return { run: localRun, assignments: localAssignments, rejections: localRejections };
     }
 
-    try {
-      const [runRes, assignRes, rejectRes] = await Promise.all([
-        supabase.from('optimization_runs').select('*').eq('id', runId).maybeSingle(),
-        supabase.from('assignments').select('*').eq('optimization_run_id', runId).order('delivery_sequence'),
-        supabase.from('rejection_reasons').select('*').eq('optimization_run_id', runId),
-      ]);
-      if (runRes.error) throw runRes.error;
-      if (assignRes.error) throw assignRes.error;
-      if (rejectRes.error) throw rejectRes.error;
-      return { run: runRes.data as OptimizationRun, assignments: (assignRes.data || []) as Assignment[], rejections: (rejectRes.data || []) as RejectionReason[] };
-    } catch {
-      if (localRun) return { run: localRun, assignments: localAssignments, rejections: localRejections };
-      throw new Error('Run not found in local or remote storage');
+    if (supabaseConfigured) {
+      try {
+        const [runRes, assignRes, rejectRes] = await Promise.all([
+          supabase.from('optimization_runs').select('*').eq('id', runId).maybeSingle(),
+          supabase.from('assignments').select('*').eq('optimization_run_id', runId).order('delivery_sequence'),
+          supabase.from('rejection_reasons').select('*').eq('optimization_run_id', runId),
+        ]);
+        if (runRes.error) throw runRes.error;
+        if (assignRes.error) throw assignRes.error;
+        if (rejectRes.error) throw rejectRes.error;
+        return { run: runRes.data as OptimizationRun, assignments: (assignRes.data || []) as Assignment[], rejections: (rejectRes.data || []) as RejectionReason[] };
+      } catch {
+        if (localRun) return { run: localRun, assignments: localAssignments, rejections: localRejections };
+        throw new Error('Run not found in local or remote storage');
+      }
     }
+
+    if (localRun) return { run: localRun, assignments: localAssignments, rejections: localRejections };
+    throw new Error('Run not found in local or remote storage');
   },
 
   setError: (e) => set({ error: e }),
@@ -1167,23 +1176,25 @@ export async function generateAssignmentToken(lorryId: string, shipmentId: strin
     : `trk-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const now = new Date().toISOString();
 
-  try {
-    // Expire prior non-expired tokens for this lorry
-    await supabase
-      .from('driver_tracking_links')
-      .update({ expired_at: now })
-      .eq('lorry_id', lorryId)
-      .is('expired_at', null);
+  if (supabaseConfigured) {
+    try {
+      // Expire prior non-expired tokens for this lorry
+      await supabase
+        .from('driver_tracking_links')
+        .update({ expired_at: now })
+        .eq('lorry_id', lorryId)
+        .is('expired_at', null);
 
-    // Insert new token
-    await supabase.from('driver_tracking_links').insert({
-      tracking_token: token,
-      lorry_id: lorryId,
-      shipment_id: shipmentId,
-      created_at: now,
-    });
-  } catch {
-    // Fallback
+      // Insert new token
+      await supabase.from('driver_tracking_links').insert({
+        tracking_token: token,
+        lorry_id: lorryId,
+        shipment_id: shipmentId,
+        created_at: now,
+      });
+    } catch {
+      // Fallback
+    }
   }
 
   try {
