@@ -26,51 +26,10 @@ const BreakdownAlarmContext = createContext<BreakdownAlarmContextType>({
 
 export const useBreakdownAlarm = () => useContext(BreakdownAlarmContext);
 
-// Generate loud emergency PCM WAV audio data URI (100% hardware audio compatibility)
-let cachedSirenWavUri: string | null = null;
+import { SIREN_WAV_DATA_URI } from '@/components/sirenWav';
 
 function getSirenWavUri(): string {
-  if (cachedSirenWavUri) return cachedSirenWavUri;
-  const sampleRate = 22050;
-  const duration = 0.6; // 0.6 second siren pulse
-  const numSamples = Math.floor(sampleRate * duration);
-  const buffer = new Uint8Array(44 + numSamples);
-  const view = new DataView(buffer.buffer);
-
-  const writeString = (offset: number, string: string) => {
-    for (let i = 0; i < string.length; i++) {
-      buffer[offset + i] = string.charCodeAt(i);
-    }
-  };
-
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + numSamples, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate, true);
-  view.setUint16(32, 1, true);
-  view.setUint16(34, 8, true);
-  writeString(36, 'data');
-  view.setUint32(40, numSamples, true);
-
-  for (let i = 0; i < numSamples; i++) {
-    const t = i / sampleRate;
-    const freq = 1400 - (700 * (t / duration));
-    const angle = 2 * Math.PI * freq * t;
-    const sample = Math.sin(angle) > 0 ? 240 : 15;
-    buffer[44 + i] = sample;
-  }
-
-  let binary = '';
-  for (let i = 0; i < buffer.length; i++) {
-    binary += String.fromCharCode(buffer[i]);
-  }
-  cachedSirenWavUri = 'data:audio/wav;base64,' + btoa(binary);
-  return cachedSirenWavUri;
+  return SIREN_WAV_DATA_URI;
 }
 
 // Global persistent audio context reference unlocked by user click
