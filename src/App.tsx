@@ -12,8 +12,10 @@ import {
   Zap,
   Menu,
   X,
+  Bell,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
+import { enablePushAlerts } from '@/lib/push';
 import { Dashboard } from '@/pages/Dashboard';
 import { FleetManagement } from '@/pages/FleetManagement';
 import { ShipmentManagement } from '@/pages/ShipmentManagement';
@@ -203,6 +205,17 @@ function MainLayout({
             </h2>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={async () => {
+                const res = await enablePushAlerts();
+                alert(res.message);
+              }}
+              className="px-3 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md flex items-center gap-1.5 transition-transform active:scale-95"
+              title="Enable Web Push notifications for background OS alerts when tab is closed"
+            >
+              <Bell size={14} />
+              Enable Push Alerts
+            </button>
             <button
               onClick={testSound}
               className="px-3 py-1.5 text-xs font-extrabold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md flex items-center gap-1.5 transition-transform active:scale-95 animate-pulse"
