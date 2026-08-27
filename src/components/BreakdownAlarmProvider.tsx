@@ -26,48 +26,45 @@ const BreakdownAlarmContext = createContext<BreakdownAlarmContextType>({
 
 export const useBreakdownAlarm = () => useContext(BreakdownAlarmContext);
 
-// Dual-Oscillator Loud Piercing Siren Synthesizer
-function playSirenBeep(audioCtx: AudioContext) {
+// Dual-Oscillator Loud Triple-Pulse Piercing Siren Synthesizer
+function playSirenBeep() {
   try {
-    if (audioCtx.state === 'suspended') {
-      void audioCtx.resume();
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
     }
 
-    const now = audioCtx.currentTime;
+    const pulses = [0, 0.25, 0.5]; // 3 rapid loud siren pulses
+    pulses.forEach((delay) => {
+      const now = ctx.currentTime + delay;
 
-    // Primary High-Loudness Square Wave Oscillator (Piercing Siren)
-    const osc1 = audioCtx.createOscillator();
-    const gain1 = audioCtx.createGain();
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'square';
+      osc1.frequency.setValueAtTime(1400, now);
+      osc1.frequency.exponentialRampToValueAtTime(700, now + 0.2);
+      gain1.gain.setValueAtTime(1.0, now); // Maximum 100% Volume
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
 
-    osc1.type = 'square';
-    osc1.frequency.setValueAtTime(1200, now);
-    osc1.frequency.exponentialRampToValueAtTime(650, now + 0.45);
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sawtooth';
+      osc2.frequency.setValueAtTime(1800, now);
+      osc2.frequency.exponentialRampToValueAtTime(900, now + 0.2);
+      gain2.gain.setValueAtTime(0.7, now);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
 
-    gain1.gain.setValueAtTime(0.85, now);
-    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-
-    osc1.connect(gain1);
-    gain1.connect(audioCtx.destination);
-
-    // Harmonic Sawtooth Wave Oscillator (Police Siren Sweep)
-    const osc2 = audioCtx.createOscillator();
-    const gain2 = audioCtx.createGain();
-
-    osc2.type = 'sawtooth';
-    osc2.frequency.setValueAtTime(1500, now);
-    osc2.frequency.exponentialRampToValueAtTime(800, now + 0.45);
-
-    gain2.gain.setValueAtTime(0.5, now);
-    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-
-    osc2.connect(gain2);
-    gain2.connect(audioCtx.destination);
-
-    osc1.start(now);
-    osc2.start(now);
-
-    osc1.stop(now + 0.52);
-    osc2.stop(now + 0.52);
+      osc1.start(now);
+      osc2.start(now);
+      osc1.stop(now + 0.23);
+      osc2.stop(now + 0.23);
+    });
   } catch (err) {
     console.warn('Alarm audio blocked:', err);
   }
@@ -155,13 +152,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
             void fetchData();
 
             // Attempt alarm sound playback
-            if (audioCtxRef.current) {
-              try {
-                playSirenBeep(audioCtxRef.current);
-              } catch (err) {
-                console.warn('Alarm audio blocked:', err);
-              }
-            }
+            playSirenBeep();
           }
         }
       )
@@ -202,22 +193,10 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (breakdownLorries.length === 0 || isMuted) return;
 
-    if (audioCtxRef.current) {
-      try {
-        playSirenBeep(audioCtxRef.current);
-      } catch (err) {
-        console.warn('Alarm audio blocked:', err);
-      }
-    }
+    playSirenBeep();
 
     const interval = setInterval(() => {
-      if (audioCtxRef.current) {
-        try {
-          playSirenBeep(audioCtxRef.current);
-        } catch (err) {
-          console.warn('Alarm audio blocked:', err);
-        }
-      }
+      playSirenBeep();
     }, 10000);
 
     return () => clearInterval(interval);
@@ -254,18 +233,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   const toggleMute = () => setIsMuted((m) => !m);
 
   const testSound = () => {
-    if (!audioCtxRef.current) {
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioContextClass) audioCtxRef.current = new AudioContextClass();
-    }
-    if (audioCtxRef.current) {
-      try {
-        void audioCtxRef.current.resume();
-        playSirenBeep(audioCtxRef.current);
-      } catch (err) {
-        console.warn('Alarm audio blocked during test:', err);
-      }
-    }
+    playSirenBeep();
   };
 
   const unresolvedAlertsCount = breakdownLorries.length + activeAlerts.filter((a) => !a.resolved).length;
