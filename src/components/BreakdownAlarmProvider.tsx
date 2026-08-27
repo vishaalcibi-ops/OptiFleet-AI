@@ -148,7 +148,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
       if (audioCtxRef.current) {
         playSirenBeep(audioCtxRef.current);
       }
-    }, 1200);
+    }, 10000); // Repeat siren alarm every 10 seconds as requested
 
     return () => clearInterval(interval);
   }, [breakdownLorries.length, isMuted]);
