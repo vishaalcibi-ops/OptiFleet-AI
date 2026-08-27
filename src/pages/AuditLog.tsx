@@ -57,14 +57,14 @@ export function AuditLog() {
       </div>
 
       {activeTab === 'ACTIVITY' && (
-        <div className="card overflow-hidden">
+      <div className="card overflow-hidden">
           <table className="w-full">
             <thead className="bg-base-800/50">
               <tr>
                 <th className="table-header text-left px-4 py-3 w-[160px]">Timestamp</th>
-                <th className="table-header text-left px-4 py-3 w-[120px]">Entity</th>
-                <th className="table-header text-left px-4 py-3 w-[100px]">ID</th>
-                <th className="table-header text-left px-4 py-3 w-[140px]">Action</th>
+                <th className="table-header text-left px-4 py-3 w-[160px]">Action</th>
+                <th className="table-header text-left px-4 py-3 w-[100px]">Lorry</th>
+                <th className="table-header text-left px-4 py-3 w-[100px]">Shipment</th>
                 <th className="table-header text-left px-4 py-3">Details</th>
               </tr>
             </thead>
@@ -79,18 +79,11 @@ export function AuditLog() {
               )}
               {auditLog.map((log) => (
                 <tr key={log.id} className="hover:bg-base-800/30 transition-colors">
-                  <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{formatTime(log.created_at)}</td>
-                  <td className="px-4 py-3 text-gray-300 text-sm uppercase text-xs">{log.entity_type}</td>
-                  <td className="px-4 py-3 font-mono text-accent-400 text-sm">{log.entity_id}</td>
-                  <td className="px-4 py-3 text-gray-300 text-sm font-medium">{log.action}</td>
-                  <td className="px-4 py-3 text-gray-400 text-sm">
-                    {log.details || '-'}
-                    {log.old_value && log.new_value && log.action === 'status_change' && (
-                       <span className="block text-xs mt-1 text-gray-500">
-                         {String((log.old_value as any).status)} → {String((log.new_value as any).status)}
-                       </span>
-                    )}
-                  </td>
+                  <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{log.created_at ? formatTime(log.created_at) : '-'}</td>
+                  <td className="px-4 py-3 text-accent-400 text-sm font-semibold uppercase">{log.action || '-'}</td>
+                  <td className="px-4 py-3 font-mono text-gray-300 text-sm">{log.lorry_id || '-'}</td>
+                  <td className="px-4 py-3 font-mono text-gray-300 text-sm">{log.shipment_id || '-'}</td>
+                  <td className="px-4 py-3 text-gray-400 text-sm">{log.details || '-'}</td>
                 </tr>
               ))}
             </tbody>

@@ -53,15 +53,12 @@ export interface DriverAlert {
 }
 
 export interface AuditLogRow {
-  id: string;
-  created_at: string;
-  entity_type: 'lorry' | 'shipment' | 'optimization';
-  entity_id: string;
+  id?: string;
+  created_at?: string;
   action: string;
-  old_value: Record<string, unknown> | null;
-  new_value: Record<string, unknown> | null;
-  actor: string;
-  details: string | null;
+  details?: string | null;
+  lorry_id?: string | null;
+  shipment_id?: string | null;
 }
 
 export interface Shipment {

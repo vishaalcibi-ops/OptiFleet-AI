@@ -200,22 +200,18 @@ const fallbackLocations = (lorries: Lorry[], shipments: Shipment[]): Location[] 
 // ─── Fire-and-forget audit logger ─────────────────────────────────────────────
 // Inserts a row into the `audit_log` table. Never throws or blocks the caller.
 async function logAudit(
-  entity_type: AuditLogRow['entity_type'],
-  entity_id: string,
   action: string,
-  old_value: Record<string, unknown> | null,
-  new_value: Record<string, unknown> | null,
-  details?: string,
+  details?: string | null,
+  lorry_id?: string | null,
+  shipment_id?: string | null,
 ): Promise<void> {
+  if (!supabaseConfigured) return;
   try {
     await supabase.from('audit_log').insert({
-      entity_type,
-      entity_id,
-      action,
-      old_value,
-      new_value,
-      actor: 'user',
+      action: action || 'UNKNOWN_ACTION',
       details: details ?? null,
+      lorry_id: lorry_id ?? null,
+      shipment_id: shipment_id ?? null,
     });
   } catch {
     console.warn('[logAudit] Failed to write audit log entry (non-fatal)');
@@ -425,10 +421,10 @@ export const useStore = create<AppState>((set, get) => ({
 
       // 3. Audit log
       void logAudit(
-        'lorry', oldLorry.lorry_id, 'breakdown_reassign',
-        { status: oldStatus, assignment_status: oldAssignmentStatus, shipment: oldShipmentId },
-        { status: updates.status, assignment_status: 'available', shipment: null },
-        `Lorry set to ${updates.status}; shipment ${oldShipmentId ?? ''} requeued for next optimization run`
+        'breakdown_reassign',
+        `Lorry set to ${updates.status}; shipment ${oldShipmentId ?? ''} requeued for next optimization run`,
+        oldLorry.lorry_id,
+        oldShipmentId
       );
     } else {
       // Normal update path
@@ -447,10 +443,10 @@ export const useStore = create<AppState>((set, get) => ({
       // Audit: log status changes
       if (updates.status && oldStatus !== updates.status && oldLorry) {
         void logAudit(
-          'lorry', oldLorry.lorry_id, 'status_change',
-          { status: oldStatus, assignment_status: oldAssignmentStatus },
-          { status: updates.status },
-          `Status changed from ${oldStatus} to ${updates.status}`
+          'status_change',
+          `Status changed from ${oldStatus} to ${updates.status}`,
+          oldLorry.lorry_id,
+          null
         );
       }
     }
@@ -595,11 +591,7 @@ export const useStore = create<AppState>((set, get) => ({
     // Log before deletion so we capture the row
     const lorryToDelete = get().lorries.find((l) => l.id === id);
     if (lorryToDelete) {
-      void logAudit('lorry', lorryToDelete.lorry_id, 'deleted',
-        { lorry_id: lorryToDelete.lorry_id, status: lorryToDelete.status, location: lorryToDelete.current_location_name },
-        null,
-        `Lorry ${lorryToDelete.lorry_id} deleted`
-      );
+      void logAudit('deleted', `Lorry ${lorryToDelete.lorry_id} deleted`, lorryToDelete.lorry_id, null);
     }
     try {
       const { error } = await supabase.from('lorries').delete().eq('id', id);
@@ -741,10 +733,10 @@ export const useStore = create<AppState>((set, get) => ({
 
     // Audit: log delivery
     void logAudit(
-      'shipment', shipment.shipment_id, 'delivered',
-      { shipment_status: shipment.shipment_status, assigned_lorry_id: targetLorryId, location: shipment.pickup_location_name },
-      { shipment_status: 'delivered', location: shipment.destination_name },
-      `Shipment ${shipment.shipment_id} delivered to ${shipment.destination_name}; lorry ${targetLorryId ?? ''} location updated to ${shipment.destination_name}`
+      'delivered',
+      `Shipment ${shipment.shipment_id} delivered to ${shipment.destination_name}; lorry ${targetLorryId ?? ''} location updated to ${shipment.destination_name}`,
+      targetLorryId,
+      shipment.shipment_id
     );
 
     try {
@@ -875,7 +867,7 @@ export const useStore = create<AppState>((set, get) => ({
         }).eq('shipment_id', u.shipment.shipment_id);
       }
       
-      void logAudit('optimization', 'scenario', 'applied', null, { run_summary: result.after_summary }, 'Scenario sandbox results applied to live data');
+      void logAudit('scenario_applied', 'Scenario sandbox results applied to live data', null, null);
       
       await get().fetchData();
     } catch (e) {
@@ -1078,11 +1070,12 @@ export const useStore = create<AppState>((set, get) => ({
                 await supabase.from('shipments').update({ shipment_status: 'unassigned', status: 'unassigned', assigned_lorry_id: null, assigned_driver_name: null, updated_at: now2 }).eq('shipment_id', u.shipment.shipment_id);
               }
               
-              void logAudit('optimization', dbRunId, 'run_completed', null, {
-                assigned: result.assigned_count,
-                unassigned: result.unassigned_count,
-                total_distance: result.total_distance_km
-              }, `Optimization run completed. Assigned: ${result.assigned_count}, Unassigned: ${result.unassigned_count}`);
+              void logAudit(
+                'run_completed',
+                `Optimization run completed. Assigned: ${result.assigned_count}, Unassigned: ${result.unassigned_count}`,
+                null,
+                null
+              );
             }
           } catch {
             // Supabase unavailable — local run already saved
