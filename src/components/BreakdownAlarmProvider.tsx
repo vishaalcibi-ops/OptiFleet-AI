@@ -26,12 +26,27 @@ const BreakdownAlarmContext = createContext<BreakdownAlarmContextType>({
 
 export const useBreakdownAlarm = () => useContext(BreakdownAlarmContext);
 
+// Global persistent audio context reference unlocked by user click
+let globalAudioCtx: AudioContext | null = null;
+
+function getOrCreateAudioContext(): AudioContext | null {
+  if (!globalAudioCtx && typeof window !== 'undefined') {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (AudioContextClass) {
+      globalAudioCtx = new AudioContextClass();
+    }
+  }
+  if (globalAudioCtx && globalAudioCtx.state === 'suspended') {
+    void globalAudioCtx.resume();
+  }
+  return globalAudioCtx;
+}
+
 // Dual-Oscillator Loud Triple-Pulse Piercing Siren Synthesizer
 function playSirenBeep() {
   try {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) return;
     if (ctx.state === 'suspended') {
       void ctx.resume();
     }
@@ -76,39 +91,29 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   const [activeAlerts, setActiveAlerts] = useState<DriverAlert[]>([]);
   const [isMuted, setIsMuted] = useState(false);
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const isUnlockedRef = useRef<boolean>(false);
   const hasSubscribedRef = useRef<boolean>(false);
 
-  // A3. Standard "Unlock on first interaction" pattern
+  // A3. Unlock persistent global AudioContext on very first interaction
   useEffect(() => {
     const unlockAudio = () => {
       try {
-        if (!audioCtxRef.current) {
-          const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-          if (AudioContextClass) {
-            audioCtxRef.current = new AudioContextClass();
-          }
-        }
-        if (audioCtxRef.current) {
-          if (audioCtxRef.current.state === 'suspended') {
-            void audioCtxRef.current.resume();
-          }
-          // Play silent 0-volume blip to unlock audio context for session
-          const buffer = audioCtxRef.current.createBuffer(1, 1, 22050);
-          const source = audioCtxRef.current.createBufferSource();
+        const ctx = getOrCreateAudioContext();
+        if (ctx) {
+          void ctx.resume();
+          // Play silent 0-volume blip to unlock global AudioContext for session
+          const buffer = ctx.createBuffer(1, 1, 22050);
+          const source = ctx.createBufferSource();
           source.buffer = buffer;
-          source.connect(audioCtxRef.current.destination);
+          source.connect(ctx.destination);
           source.start(0);
-          isUnlockedRef.current = true;
         }
       } catch (err) {
-        console.warn('Audio unlock attempt caught error:', err);
+        console.warn('Audio unlock attempt error:', err);
       }
     };
 
-    document.addEventListener('click', unlockAudio, { once: true });
-    document.addEventListener('keydown', unlockAudio, { once: true });
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('keydown', unlockAudio);
 
     return () => {
       document.removeEventListener('click', unlockAudio);
