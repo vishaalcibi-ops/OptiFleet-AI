@@ -130,14 +130,44 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
     }
     hasSubscribedRef.current = true;
 
-    // Fetch initial unresolved alerts
-    void supabase
-      .from('driver_alerts')
-      .select('*')
-      .eq('resolved', false)
-      .then(({ data }) => {
-        if (data) setActiveAlerts(data as DriverAlert[]);
-      });
+    // Function to check database for active breakdowns (guaranteed polling fallback)
+    const checkActiveBreakdowns = async () => {
+      try {
+        const [alertsRes, lorriesRes] = await Promise.all([
+          supabase.from('driver_alerts').select('*').eq('resolved', false),
+          supabase.from('lorries').select('*').or('is_breakdown.eq.true,status.eq.maintenance'),
+        ]);
+
+        if (alertsRes.data) {
+          setActiveAlerts((prev) => {
+            const fresh = alertsRes.data as DriverAlert[];
+            // If new alert found, trigger sound
+            if (fresh.length > prev.length) {
+              playSirenBeep();
+              void fetchData();
+            }
+            return fresh;
+          });
+        }
+
+        if (lorriesRes.data) {
+          setBreakdownLorries((prev) => {
+            const freshLorries = lorriesRes.data as Lorry[];
+            if (freshLorries.length > prev.length) {
+              playSirenBeep();
+              void fetchData();
+            }
+            return freshLorries;
+          });
+        }
+      } catch (err) {
+        console.warn('Breakdown polling error:', err);
+      }
+    };
+
+    // Initial fetch + 3-second robust polling timer
+    void checkActiveBreakdowns();
+    const pollTimer = setInterval(checkActiveBreakdowns, 3000);
 
     const channel = supabase
       .channel('global-driver-alerts-realtime')
@@ -148,10 +178,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
           const newAlert = payload.new as DriverAlert;
           if (newAlert) {
             setActiveAlerts((prev) => [newAlert, ...prev.filter((a) => a.id !== newAlert.id)]);
-            // Immediately refetch full store data (lorries, shipments) so all pages update instantly
             void fetchData();
-
-            // Attempt alarm sound playback
             playSirenBeep();
           }
         }
@@ -171,19 +198,19 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
                 updated[existingIndex] = { ...updated[existingIndex], ...newRow };
                 return updated;
               }
+              playSirenBeep();
               return [newRow, ...prev];
             } else {
               return prev.filter((l) => l.lorry_id !== newRow.lorry_id);
             }
           });
-
-          // Trigger store refetch
           void fetchData();
         }
       )
       .subscribe();
 
     return () => {
+      clearInterval(pollTimer);
       supabase.removeChannel(channel);
       hasSubscribedRef.current = false;
     };
