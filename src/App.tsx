@@ -25,7 +25,7 @@ import { Analytics } from '@/pages/Analytics';
 import { AuditLog } from '@/pages/AuditLog';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { DriverTrack } from '@/pages/DriverTrack';
-import { BreakdownAlarmProvider } from '@/components/BreakdownAlarmProvider';
+import { BreakdownAlarmProvider, useBreakdownAlarm } from '@/components/BreakdownAlarmProvider';
 
 type Page =
   | 'dashboard'
@@ -90,7 +90,44 @@ function App() {
 
   return (
     <BreakdownAlarmProvider>
-      <div className="min-h-screen flex bg-base-950">
+      <MainLayout
+        page={page}
+        setPage={setPage}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        handleNavigate={handleNavigate}
+        handleOptimize={handleOptimize}
+        error={error}
+        setError={setError}
+      />
+    </BreakdownAlarmProvider>
+  );
+}
+
+function MainLayout({
+  page,
+  setPage,
+  sidebarOpen,
+  setSidebarOpen,
+  handleNavigate,
+  handleOptimize,
+  error,
+  setError,
+}: {
+  page: Page;
+  setPage: (p: Page) => void;
+  sidebarOpen: boolean;
+  setSidebarOpen: (b: boolean) => void;
+  handleNavigate: (p: Page) => void;
+  handleOptimize: () => Promise<void>;
+  error: string | null;
+  setError: (e: string | null) => void;
+}) {
+  const { unresolvedAlertsCount } = useBreakdownAlarm();
+  const { currentResult } = useStore();
+
+  return (
+    <div className="min-h-screen flex bg-base-950">
       {/* Sidebar */}
       <aside
         className={`fixed lg:sticky top-0 left-0 h-screen w-64 app-sidebar flex flex-col z-40 transition-transform duration-300 ${
@@ -113,14 +150,22 @@ function App() {
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = page === item.id;
+            const showBadge = (item.id === 'fleet' || item.id === 'audit') && unresolvedAlertsCount > 0;
             return (
               <button
                 key={item.id}
                 onClick={() => handleNavigate(item.id)}
-                className={`nav-link ${active ? 'nav-link-active' : ''}`}
+                className={`nav-link ${active ? 'nav-link-active' : ''} flex items-center justify-between w-full`}
               >
-                <Icon size={18} />
-                {item.label}
+                <div className="flex items-center gap-2">
+                  <Icon size={18} />
+                  {item.label}
+                </div>
+                {showBadge && (
+                  <span className="px-2 py-0.5 text-[11px] font-black bg-red-600 text-white rounded-full animate-pulse shadow-sm">
+                    {unresolvedAlertsCount}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -223,7 +268,6 @@ function App() {
         </main>
       </div>
     </div>
-    </BreakdownAlarmProvider>
   );
 }
 
