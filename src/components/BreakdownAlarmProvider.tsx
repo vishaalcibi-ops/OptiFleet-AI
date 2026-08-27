@@ -148,22 +148,50 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   const [breakdownLorries, setBreakdownLorries] = useState<Lorry[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<DriverAlert[]>([]);
   const [isMuted, setIsMuted] = useState(false);
+  const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
 
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const hasSubscribedRef = useRef<boolean>(false);
 
-  // A3. Unlock persistent global AudioContext on very first interaction
+  const triggerSirenSound = () => {
+    if (isMuted) return;
+
+    // 1. Play DOM HTML5 Audio element
+    if (audioRef.current) {
+      try {
+        audioRef.current.currentTime = 0;
+        audioRef.current.volume = 1.0;
+        void audioRef.current.play().catch((err) => console.warn('DOM audio play error:', err));
+      } catch (err) {
+        console.warn('DOM Audio catch:', err);
+      }
+    }
+
+    // 2. Play Web Audio API synthesizer
+    playSirenBeep();
+  };
+
+  // A3. Unlock DOM Audio Element & Web Audio API on very first interaction
   useEffect(() => {
     const unlockAudio = () => {
       try {
+        if (audioRef.current) {
+          audioRef.current.volume = 0.01;
+          const promise = audioRef.current.play();
+          if (promise !== undefined) {
+            promise
+              .then(() => {
+                audioRef.current?.pause();
+                if (audioRef.current) audioRef.current.currentTime = 0;
+                setIsAudioUnlocked(true);
+              })
+              .catch(() => {});
+          }
+        }
+
         const ctx = getOrCreateAudioContext();
-        if (ctx) {
+        if (ctx && ctx.state === 'suspended') {
           void ctx.resume();
-          // Play silent 0-volume blip to unlock global AudioContext for session
-          const buffer = ctx.createBuffer(1, 1, 22050);
-          const source = ctx.createBufferSource();
-          source.buffer = buffer;
-          source.connect(ctx.destination);
-          source.start(0);
         }
       } catch (err) {
         console.warn('Audio unlock attempt error:', err);
@@ -302,10 +330,10 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (breakdownLorries.length === 0 || isMuted) return;
 
-    playSirenBeep();
+    triggerSirenSound();
 
     const interval = setInterval(() => {
-      playSirenBeep();
+      triggerSirenSound();
     }, 10000);
 
     return () => clearInterval(interval);
@@ -342,7 +370,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   const toggleMute = () => setIsMuted((m) => !m);
 
   const testSound = () => {
-    playSirenBeep();
+    triggerSirenSound();
   };
 
   const unresolvedAlertsCount = breakdownLorries.length + activeAlerts.filter((a) => !a.resolved).length;
@@ -359,6 +387,9 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         testSound,
       }}
     >
+      {/* Hidden DOM Audio Element for guaranteed hardware audio playback */}
+      <audio ref={audioRef} src={getSirenWavUri()} preload="auto" className="hidden" />
+
       {/* A4. Mandatory Persistent Visual Alert Banner requiring manual acknowledgment */}
       {(breakdownLorries.length > 0 || activeAlerts.some((a) => !a.resolved)) && (
         <aside
