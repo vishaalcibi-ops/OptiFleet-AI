@@ -9,6 +9,7 @@ interface BreakdownAlarmContextType {
   acknowledgeBreakdown: (lorryId: string) => Promise<void>;
   isMuted: boolean;
   toggleMute: () => void;
+  testSound: () => void;
 }
 
 const BreakdownAlarmContext = createContext<BreakdownAlarmContextType>({
@@ -16,15 +17,16 @@ const BreakdownAlarmContext = createContext<BreakdownAlarmContextType>({
   acknowledgeBreakdown: async () => {},
   isMuted: false,
   toggleMute: () => {},
+  testSound: () => {},
 });
 
 export const useBreakdownAlarm = () => useContext(BreakdownAlarmContext);
 
-// Web Audio API Beep Generator
+// Web Audio API High-Volume Siren Beep Generator
 function playSirenBeep(audioCtx: AudioContext) {
   try {
     if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
+      void audioCtx.resume();
     }
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
@@ -32,21 +34,21 @@ function playSirenBeep(audioCtx: AudioContext) {
     osc.type = 'sawtooth';
     const now = audioCtx.currentTime;
 
-    // Siren frequency sweep: 880Hz down to 587Hz (A5 -> D5)
-    osc.frequency.setValueAtTime(880, now);
-    osc.frequency.exponentialRampToValueAtTime(587, now + 0.35);
+    // Siren frequency sweep: 950Hz -> 500Hz
+    osc.frequency.setValueAtTime(950, now);
+    osc.frequency.exponentialRampToValueAtTime(500, now + 0.4);
 
-    // Envelope
-    gain.gain.setValueAtTime(0.2, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.38);
+    // High volume gain (0.75) for maximum clarity and loudness
+    gain.gain.setValueAtTime(0.75, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
 
     osc.connect(gain);
     gain.connect(audioCtx.destination);
 
     osc.start(now);
-    osc.stop(now + 0.4);
-  } catch {
-    // Ignore audio context errors if browser blocks autoplay before user gesture
+    osc.stop(now + 0.48);
+  } catch (err) {
+    console.warn('Audio Context play error:', err);
   }
 }
 
@@ -156,8 +158,19 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
 
   const toggleMute = () => setIsMuted((m) => !m);
 
+  const testSound = () => {
+    if (!audioCtxRef.current) {
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioContextClass) audioCtxRef.current = new AudioContextClass();
+    }
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.resume();
+      playSirenBeep(audioCtxRef.current);
+    }
+  };
+
   return (
-    <BreakdownAlarmContext.Provider value={{ breakdownLorries, acknowledgeBreakdown, isMuted, toggleMute }}>
+    <BreakdownAlarmContext.Provider value={{ breakdownLorries, acknowledgeBreakdown, isMuted, toggleMute, testSound }}>
       {/* Persistent Red Alarm Banner fixed to top when breakdowns are active */}
       {breakdownLorries.length > 0 && (
         <aside
@@ -180,6 +193,14 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={testSound}
+              className="px-2.5 py-1 text-xs font-semibold bg-white text-red-700 hover:bg-red-50 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
+              title="Test Siren Sound"
+            >
+              <Volume2 size={14} />
+              Test Sound
+            </button>
             <button
               onClick={toggleMute}
               className="px-2.5 py-1 text-xs font-semibold bg-red-700 hover:bg-red-800 rounded-lg flex items-center gap-1.5 transition-colors"

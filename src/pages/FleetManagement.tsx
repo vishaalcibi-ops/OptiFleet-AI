@@ -38,7 +38,7 @@ const emptyForm: FormState = {
 
 export function FleetManagement() {
   const { lorries, addLorry, updateLorry, deleteLorry, shipments, locations, resetData } = useStore();
-  const { breakdownLorries, acknowledgeBreakdown } = useBreakdownAlarm();
+  const { breakdownLorries, acknowledgeBreakdown, testSound } = useBreakdownAlarm();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Lorry | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
