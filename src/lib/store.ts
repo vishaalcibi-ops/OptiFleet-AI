@@ -1046,6 +1046,8 @@ export const useStore = create<AppState>((set, get) => ({
                   await supabase.from('shipments').update({ shipment_status: 'active', status: 'assigned', assigned_lorry_id: plan.lorry.lorry_id, assigned_driver_name: plan.lorry.driver_name ?? null, updated_at: now2 }).eq('shipment_id', ps.shipment.shipment_id);
                 }
                 await supabase.from('lorries').update({ assignment_status: 'assigned', current_shipment_id: ps.shipment.shipment_id, updated_at: now2 }).eq('lorry_id', plan.lorry.lorry_id);
+                // Mint a fresh tracking token per active assignment
+                void generateAssignmentToken(plan.lorry.lorry_id, ps.shipment.shipment_id);
               }
             }
 
@@ -1133,7 +1135,67 @@ export const useStore = create<AppState>((set, get) => ({
       error: null,
     };
     set(newState);
-    persist(newState);
   },
 }));
+
+// Helper functions for driver tracking link tokens
+export async function generateAssignmentToken(lorryId: string, shipmentId: string): Promise<string> {
+  const token = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `trk-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const now = new Date().toISOString();
+
+  try {
+    // Expire prior non-expired tokens for this lorry
+    await supabase
+      .from('driver_tracking_links')
+      .update({ expired_at: now })
+      .eq('lorry_id', lorryId)
+      .is('expired_at', null);
+
+    // Insert new token
+    await supabase.from('driver_tracking_links').insert({
+      tracking_token: token,
+      lorry_id: lorryId,
+      shipment_id: shipmentId,
+      created_at: now,
+    });
+  } catch {
+    // Fallback
+  }
+
+  try {
+    const cache = JSON.parse(localStorage.getItem('optifleet_tracking_tokens') || '{}');
+    cache[lorryId] = token;
+    cache[shipmentId] = token;
+    cache[token] = { lorry_id: lorryId, shipment_id: shipmentId, expired_at: null };
+    localStorage.setItem('optifleet_tracking_tokens', JSON.stringify(cache));
+  } catch {}
+
+  return token;
+}
+
+export async function getActiveTrackingToken(lorryId: string, shipmentId?: string): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('driver_tracking_links')
+      .select('tracking_token')
+      .eq('lorry_id', lorryId)
+      .is('expired_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (data && data.length > 0 && data[0].tracking_token) {
+      return data[0].tracking_token;
+    }
+  } catch {}
+
+  try {
+    const cache = JSON.parse(localStorage.getItem('optifleet_tracking_tokens') || '{}');
+    if (cache[lorryId]) return cache[lorryId];
+    if (shipmentId && cache[shipmentId]) return cache[shipmentId];
+  } catch {}
+
+  return await generateAssignmentToken(lorryId, shipmentId || 'S001');
+}
 

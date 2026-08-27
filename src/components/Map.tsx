@@ -154,14 +154,20 @@ export function Map({ lorries, shipments, plans, latestAssignmentRoutes = [] }: 
       {lorries.map((lorry) => {
         const visualState = getVisualState(lorry);
         const { label, color, stroke } = statusStyles[visualState];
-        const freshness = formatLocationFreshness(lorry.last_location_update);
-        const isLive = freshness !== 'No live location';
+
+        // Prefer real driver GPS position if updated within the last 2 minutes
+        const isGpsRecent = Boolean(lorry.last_gps_updated_at && (Date.now() - new Date(lorry.last_gps_updated_at).getTime() < 120000));
+        const markerLat = isGpsRecent && lorry.last_gps_latitude != null ? lorry.last_gps_latitude : lorry.current_latitude;
+        const markerLng = isGpsRecent && lorry.last_gps_longitude != null ? lorry.last_gps_longitude : lorry.current_longitude;
+
+        const freshness = formatLocationFreshness(lorry.last_gps_updated_at || lorry.last_location_update);
+        const isLive = isGpsRecent || freshness !== 'No live location';
         const isBreakdown = Boolean(lorry.is_breakdown);
 
         return (
           <Marker
             key={lorry.id}
-            position={[lorry.current_latitude, lorry.current_longitude]}
+            position={[markerLat, markerLng]}
             icon={isBreakdown ? createBreakdownIcon() : createVehicleIcon(visualState)}
           >
             <Popup>

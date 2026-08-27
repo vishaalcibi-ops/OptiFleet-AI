@@ -26,8 +26,30 @@ export interface Lorry {
   heading_deg?: number | null;
   is_breakdown?: boolean;
   breakdown_at?: string | null;
+  last_gps_latitude?: number | null;
+  last_gps_longitude?: number | null;
+  last_gps_updated_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface DriverTrackingLink {
+  id: string;
+  tracking_token: string;
+  lorry_id: string;
+  shipment_id: string;
+  created_at: string;
+  expired_at?: string | null;
+}
+
+export interface DriverAlert {
+  id: string;
+  created_at: string;
+  lorry_id: string;
+  shipment_id?: string | null;
+  alert_type: string;
+  message: string;
+  resolved: boolean;
 }
 
 export interface AuditLogRow {

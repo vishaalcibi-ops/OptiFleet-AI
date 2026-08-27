@@ -13,8 +13,10 @@ import {
   ChevronDown,
   ChevronRight,
   Route,
+  Share2,
+  MessageSquare,
 } from 'lucide-react';
-import { useStore } from '@/lib/store';
+import { useStore, getActiveTrackingToken } from '@/lib/store';
 import {
   DeadlineBadge,
   PriorityBadge,
@@ -315,6 +317,40 @@ function LorryPlanCard({
               total={plan.lorry.maximum_volume_capacity_m3}
               unit="m³"
             />
+          </div>
+
+          {/* Driver Link Actions */}
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-base-700/50">
+            <span className="text-xs font-semibold text-gray-400">Driver Tracking Link:</span>
+            <button
+              onClick={async () => {
+                const token = await getActiveTrackingToken(plan.lorry.lorry_id, plan.sequence[0]?.shipment.shipment_id);
+                const url = `${window.location.origin}/track/${token}`;
+                try {
+                  await navigator.clipboard.writeText(url);
+                  alert(`Copied Driver Link:\n${url}`);
+                } catch {
+                  prompt('Copy Driver Link:', url);
+                }
+              }}
+              className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1.5"
+            >
+              <Share2 size={13} /> Copy Link
+            </button>
+            {plan.lorry.driver_phone && (
+              <button
+                onClick={async () => {
+                  const cleanedPhone = plan.lorry.driver_phone!.replace(/\D/g, '');
+                  const token = await getActiveTrackingToken(plan.lorry.lorry_id, plan.sequence[0]?.shipment.shipment_id);
+                  const url = `${window.location.origin}/track/${token}`;
+                  const text = `OptiFleet Driver Link: ${url}`;
+                  window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(text)}`, '_blank');
+                }}
+                className="btn-secondary text-xs py-1 px-2.5 text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5"
+              >
+                <MessageSquare size={13} /> Share via WhatsApp
+              </button>
+            )}
           </div>
 
           {/* Route */}

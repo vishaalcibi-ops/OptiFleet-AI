@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Truck, Plus, Pencil, Trash2, Search, Share2, Check, AlertOctagon, CheckCircle2, ExternalLink, MessageSquare } from 'lucide-react';
-import { useStore } from '@/lib/store';
+import { useStore, getActiveTrackingToken } from '@/lib/store';
 import { useBreakdownAlarm } from '@/components/BreakdownAlarmProvider';
 import { Modal } from '@/components/Modal';
 import { LorryStatusBadge, formatNumber } from '@/components/Badges';
@@ -47,7 +47,8 @@ export function FleetManagement() {
   const [copiedLorryId, setCopiedLorryId] = useState<string | null>(null);
 
   const copyTrackingLink = async (l: Lorry) => {
-    const url = `${window.location.origin}/track/${l.lorry_id}`;
+    const token = await getActiveTrackingToken(l.lorry_id, l.current_shipment_id || undefined);
+    const url = `${window.location.origin}/track/${token}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopiedLorryId(l.lorry_id);
@@ -244,10 +245,11 @@ export function FleetManagement() {
                         </button>
                         {l.driver_phone && (
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               const cleanedPhone = l.driver_phone!.replace(/\D/g, '');
-                              const text = `OptiFleet Driver Link: ${window.location.origin}/track/${l.lorry_id}`;
-                              window.open(`https://api.whatsapp.com/send?phone=${cleanedPhone}&text=${encodeURIComponent(text)}`, '_blank');
+                              const token = await getActiveTrackingToken(l.lorry_id, l.current_shipment_id || undefined);
+                              const text = `OptiFleet Driver Link: ${window.location.origin}/track/${token}`;
+                              window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(text)}`, '_blank');
                             }}
                             className="btn-ghost p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-500/10"
                             title="Send Tracking Link via WhatsApp"
@@ -256,7 +258,10 @@ export function FleetManagement() {
                           </button>
                         )}
                         <button
-                          onClick={() => window.open(`/track/${l.lorry_id}`, '_blank')}
+                          onClick={async () => {
+                            const token = await getActiveTrackingToken(l.lorry_id, l.current_shipment_id || undefined);
+                            window.open(`/track/${token}`, '_blank');
+                          }}
                           className="btn-ghost p-1.5 rounded-lg hover:text-sky-600"
                           title="Open Driver Phone View & SOS (New Tab)"
                         >
