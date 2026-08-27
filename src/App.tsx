@@ -158,6 +158,34 @@ function App() {
             </h2>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                try {
+                  const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+                  if (AudioContextClass) {
+                    const ctx = new AudioContextClass();
+                    void ctx.resume();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(1200, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.5);
+                    gain.gain.setValueAtTime(0.9, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.52);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.55);
+                  }
+                } catch (e) {
+                  console.error('Test sound error:', e);
+                }
+              }}
+              className="px-3 py-1.5 text-xs font-extrabold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md flex items-center gap-1.5 transition-transform active:scale-95 animate-pulse"
+              title="Click to test emergency siren sound"
+            >
+              🔊 TEST SIREN SOUND
+            </button>
             {currentResult && (
               <span className="text-xs text-gray-500 hidden sm:inline">
                 Last run: {new Date(currentResult.timestamp).toLocaleTimeString()}
