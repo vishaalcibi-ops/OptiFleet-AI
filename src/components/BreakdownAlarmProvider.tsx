@@ -304,49 +304,62 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   // Acknowledge breakdown action
   const acknowledgeBreakdown = async (lorryId: string) => {
     const now = new Date().toISOString();
-    try {
-      await Promise.all([
-        supabase
-          .from('lorries')
-          .update({
-            is_breakdown: false,
-            breakdown_at: null,
-            status: 'active',
-            driver_available: true,
-            assignment_status: 'available',
-            current_shipment_id: null,
-            updated_at: now,
-          })
-          .eq('lorry_id', lorryId),
-        supabase
-          .from('driver_alerts')
-          .update({ resolved: true })
-          .eq('lorry_id', lorryId),
-      ]);
 
-      // Also update local Zustand state so the UI shows the change immediately
-      useStore.setState((state) => ({
-        lorries: state.lorries.map((l) =>
-          l.lorry_id === lorryId
-            ? {
-                ...l,
-                is_breakdown: false,
-                breakdown_at: null,
-                status: 'active' as const,
-                driver_available: true,
-                assignment_status: 'available' as const,
-                current_shipment_id: null,
-                updated_at: now,
-              }
-            : l
-        ),
-      }));
+    // 1. Apply locally FIRST — always works, even offline / placeholder URL
+    useStore.setState((state) => {
+      const lorries = state.lorries.map((l) =>
+        l.lorry_id === lorryId
+          ? {
+              ...l,
+              is_breakdown: false,
+              breakdown_at: null,
+              status: 'active' as const,
+              driver_available: true,
+              assignment_status: 'available' as const,
+              current_shipment_id: null,
+              updated_at: now,
+            }
+          : l
+      );
+      // Persist to localStorage so fetchData won't revert it
+      try { localStorage.setItem('optifleet_lorries', JSON.stringify(lorries)); } catch { /* ignore */ }
+      return { lorries };
+    });
 
-      setBreakdownLorries((prev) => prev.filter((l) => l.lorry_id !== lorryId));
-      setActiveAlerts((prev) => prev.filter((a) => a.lorry_id !== lorryId));
-      void fetchData();
-    } catch (err) {
-      console.error('Error acknowledging breakdown:', err);
+    // 2. Clear alarm UI immediately
+    setBreakdownLorries((prev) => prev.filter((l) => l.lorry_id !== lorryId));
+    setActiveAlerts((prev) => prev.filter((a) => a.lorry_id !== lorryId));
+
+    // 3. Stop the siren sound
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    // 4. Supabase update — best-effort in background
+    if (supabaseConfigured) {
+      try {
+        await Promise.all([
+          supabase
+            .from('lorries')
+            .update({
+              is_breakdown: false,
+              breakdown_at: null,
+              status: 'active',
+              driver_available: true,
+              assignment_status: 'available',
+              current_shipment_id: null,
+              updated_at: now,
+            })
+            .eq('lorry_id', lorryId),
+          supabase
+            .from('driver_alerts')
+            .update({ resolved: true })
+            .eq('lorry_id', lorryId),
+        ]);
+      } catch (err) {
+        console.warn('Supabase acknowledge failed (local already applied):', err);
+      }
     }
   };
 
