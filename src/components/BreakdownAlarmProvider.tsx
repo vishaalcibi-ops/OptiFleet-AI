@@ -353,8 +353,6 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
           supabase
             .from('lorries')
             .update({
-              is_breakdown: false,
-              breakdown_at: null,
               status: 'active',
               assignment_status: 'available',
               current_shipment_id: null,
