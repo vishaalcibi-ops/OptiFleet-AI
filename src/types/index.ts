@@ -145,6 +145,12 @@ export interface Assignment {
   split_volume_m3?: number | null;
   split_portion_weight_kg: number | null;
   split_portion_volume_m3: number | null;
+  // Relay fields
+  is_relay?: boolean;
+  relay_leg?: number | null;
+  relay_total_legs?: number | null;
+  relay_shipment_id?: string | null;
+  relay_point_name?: string | null;
 }
 
 export interface RejectionReason {
@@ -233,6 +239,14 @@ export interface LorryPlan {
   split_volume_m3?: number;
   split_portion_weight_kg?: number;
   split_portion_volume_m3?: number;
+  // Relay fields
+  is_relay?: boolean;
+  relay_leg?: number;
+  relay_total_legs?: number;
+  relay_shipment_id?: string;
+  relay_point_name?: string;
+  relay_point_lat?: number;
+  relay_point_lng?: number;
 }
 
 export interface LorryCandidateComparison {

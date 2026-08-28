@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Package, Plus, Pencil, Trash2, Search, CheckCircle2, XCircle, CircleDot, MapPin } from 'lucide-react';
+import { Package, Plus, Pencil, Trash2, Search, CheckCircle2, XCircle, CircleDot, MapPin, ChevronRight, ChevronDown, Split, RefreshCw } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { evaluateShipmentCompatibility, effectiveUrgencyScore } from '@/lib/optimizer';
 import { Modal } from '@/components/Modal';
@@ -37,7 +37,25 @@ const statusMeta: Record<ShipmentStatus, { label: string; cls: string }> = {
   unassigned: { label: 'UNASSIGNED', cls: 'bg-error-50 text-error-700 border border-error-200' },
 };
 
-function StatusBadge({ status }: { status: ShipmentStatus }) {
+function StatusBadge({ status, isRelay, isSplit, relayLeg, relayTotal, splitTotal }: { status: ShipmentStatus; isRelay?: boolean; isSplit?: boolean; relayLeg?: number; relayTotal?: number; splitTotal?: number }) {
+  if (status === 'active') {
+    if (isRelay) {
+      return (
+        <span className="badge bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1 font-semibold">
+          <RefreshCw size={11} className="animate-spin-slow" />
+          In Transit — Leg {relayLeg || 1} of {relayTotal || 2}
+        </span>
+      );
+    }
+    if (isSplit) {
+      return (
+        <span className="badge bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1 font-semibold">
+          <Split size={11} />
+          In Transit — Split ({splitTotal || 2})
+        </span>
+      );
+    }
+  }
   const meta = statusMeta[status];
   return <span className={`badge ${meta.cls}`}><CircleDot size={11} />{meta.label}</span>;
 }
@@ -85,6 +103,16 @@ export function ShipmentManagement() {
   const [search, setSearch] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [newLocation, setNewLocation] = useState({ name: '', latitude: 11, longitude: 77 });
+  const [expandedShipments, setExpandedShipments] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    setExpandedShipments((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const filtered = shipments.filter((s) => `${s.shipment_id} ${s.pickup_location_name} ${s.destination_name} ${s.assigned_lorry_id ?? ''} ${s.assigned_driver_name ?? ''}`.toLowerCase().includes(search.toLowerCase()));
   const compatibility = useMemo(() => {
@@ -112,19 +140,130 @@ export function ShipmentManagement() {
     <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[1250px]"><thead className="bg-base-800/50"><tr>{['Shipment ID','Route','Load','Deadline','Priority','Urgency','Status','Assigned Lorry','Driver','Actions'].map((h) => <th key={h} className="table-header text-left px-4 py-3">{h}</th>)}</tr></thead><tbody className="divide-y divide-base-700/40">
       {filtered.map((s) => {
         const status = s.shipment_status ?? s.status;
-        const matchingAssignments = assignments.filter((a) => a.shipment_id === s.shipment_id);
+        const matchingAssignments = assignments.filter((a) => a.shipment_id === s.shipment_id || a.parent_shipment_id === s.shipment_id);
         const uniqueLorries = Array.from(new Set(matchingAssignments.map((a) => a.lorry_id))).sort();
         const uniqueDrivers = Array.from(new Set(matchingAssignments.map((a) => a.driver_name).filter(Boolean))).sort();
 
-        const lorryDisplay = uniqueLorries.length > 1
-          ? `Split: ${uniqueLorries.join(' + ')}`
-          : s.assigned_lorry_id ?? '—';
+        const isRelay = matchingAssignments.some((a) => a.is_relay || Boolean(a.relay_leg));
+        const isSplit = !isRelay && (matchingAssignments.length > 1 || matchingAssignments.some((a) => Boolean(a.split_index)));
 
-        const driverDisplay = uniqueDrivers.length > 1
-          ? uniqueDrivers.join(' + ')
-          : s.assigned_driver_name ?? '—';
+        const isExpanded = expandedShipments.has(s.id);
+        const hasSubParts = isRelay || isSplit || matchingAssignments.length > 1;
 
-        return <tr key={s.id} className="hover:bg-base-800/30"><td className="px-4 py-3 font-mono font-semibold text-accent-300">{s.shipment_id}</td><td className="px-4 py-3"><div className="text-gray-800 font-medium">{s.pickup_location_name}</div><div className="text-xs text-gray-500">→ {s.destination_name}</div></td><td className="px-4 py-3 text-sm text-gray-600">{formatNumber(s.weight_kg)} kg<br />{formatNumber(s.volume_m3, 1)} m³</td><td className="px-4 py-3 text-sm text-gray-500">{formatTime(s.delivery_deadline)}</td><td className="px-4 py-3"><PriorityBadge priority={s.priority} /></td><td className="px-4 py-3"><UrgencyBadge shipment={s} /></td><td className="px-4 py-3"><StatusBadge status={status} /></td><td className="px-4 py-3 font-mono text-sm text-gray-700">{lorryDisplay}</td><td className="px-4 py-3 text-sm text-gray-700">{driverDisplay}</td><td className="px-4 py-3"><div className="flex items-center gap-1"><button onClick={() => openEdit(s)} className="btn-ghost p-1.5 rounded-lg" title="Edit"><Pencil size={15} /></button>{status === 'active' && <><button onClick={() => markShipmentDelivered(s.id)} className="btn-ghost p-1.5 rounded-lg text-success-600" title="Mark as Delivered"><CheckCircle2 size={16} /></button><button onClick={() => { if (confirm(`Unassign shipment ${s.shipment_id}?`)) unassignShipment(s.id); }} className="btn-ghost p-1.5 rounded-lg text-warning-600" title="Unassign Shipment"><XCircle size={16} /></button></>}{status !== 'active' && status !== 'delivered' && <button onClick={() => { if (confirm(`Delete shipment ${s.shipment_id}?`)) deleteShipment(s.id); }} className="btn-ghost p-1.5 rounded-lg hover:text-error-400" title="Delete"><Trash2 size={15} /></button>}</div></td></tr>;
+        let lorryDisplay = s.assigned_lorry_id ?? '—';
+        let driverDisplay = s.assigned_driver_name ?? '—';
+
+        if (isRelay) {
+          const sortedLegs = [...matchingAssignments].sort((a, b) => (a.relay_leg || 0) - (b.relay_leg || 0));
+          lorryDisplay = sortedLegs.map((l) => `${l.lorry_id} (Leg ${l.relay_leg || '?'})`).join(' → ');
+          driverDisplay = sortedLegs.map((l) => l.driver_name || 'Driver').join(' → ');
+        } else if (isSplit) {
+          lorryDisplay = `Split: ${uniqueLorries.join(' + ')}`;
+          driverDisplay = uniqueDrivers.join(' + ');
+        }
+
+        return (
+          <>
+            <tr key={s.id} className="hover:bg-base-800/30">
+              <td className="px-4 py-3 font-mono font-semibold text-accent-300">
+                <div className="flex items-center gap-1.5">
+                  {hasSubParts && (
+                    <button
+                      onClick={() => toggleExpand(s.id)}
+                      className="text-gray-400 hover:text-accent-400 p-0.5 rounded transition-transform"
+                      title="Toggle assignment details"
+                    >
+                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                  )}
+                  {s.shipment_id}
+                </div>
+              </td>
+              <td className="px-4 py-3">
+                <div className="text-gray-800 font-medium">{s.pickup_location_name}</div>
+                <div className="text-xs text-gray-500">→ {s.destination_name}</div>
+              </td>
+              <td className="px-4 py-3 text-sm text-gray-600">
+                {formatNumber(s.weight_kg)} kg<br />
+                {formatNumber(s.volume_m3, 1)} m³
+              </td>
+              <td className="px-4 py-3 text-sm text-gray-500">{formatTime(s.delivery_deadline)}</td>
+              <td className="px-4 py-3"><PriorityBadge priority={s.priority} /></td>
+              <td className="px-4 py-3"><UrgencyBadge shipment={s} /></td>
+              <td className="px-4 py-3">
+                <StatusBadge
+                  status={status}
+                  isRelay={isRelay}
+                  isSplit={isSplit}
+                  relayLeg={matchingAssignments[0]?.relay_leg || 1}
+                  relayTotal={matchingAssignments[0]?.relay_total_legs || 2}
+                  splitTotal={matchingAssignments.length}
+                />
+              </td>
+              <td className="px-4 py-3 font-mono text-sm text-gray-700">{lorryDisplay}</td>
+              <td className="px-4 py-3 text-sm text-gray-700">{driverDisplay}</td>
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-1">
+                  <button onClick={() => openEdit(s)} className="btn-ghost p-1.5 rounded-lg" title="Edit">
+                    <Pencil size={15} />
+                  </button>
+                  {status === 'active' && (
+                    <>
+                      <button onClick={() => markShipmentDelivered(s.id)} className="btn-ghost p-1.5 rounded-lg text-success-600" title="Mark as Delivered">
+                        <CheckCircle2 size={16} />
+                      </button>
+                      <button onClick={() => { if (confirm(`Unassign shipment ${s.shipment_id}?`)) unassignShipment(s.id); }} className="btn-ghost p-1.5 rounded-lg text-warning-600" title="Unassign Shipment">
+                        <XCircle size={16} />
+                      </button>
+                    </>
+                  )}
+                  {status !== 'active' && status !== 'delivered' && (
+                    <button onClick={() => { if (confirm(`Delete shipment ${s.shipment_id}?`)) deleteShipment(s.id); }} className="btn-ghost p-1.5 rounded-lg hover:text-error-400" title="Delete">
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+
+            {/* Expandable sub-rows for relay and split details */}
+            {isExpanded && matchingAssignments.length > 0 && (
+              <tr key={`${s.id}-details`} className="bg-base-900/30">
+                <td colSpan={10} className="px-6 py-3 border-l-4 border-purple-500">
+                  <div className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide flex items-center gap-1.5">
+                    {isRelay ? <RefreshCw size={13} className="text-purple-600" /> : <Split size={13} className="text-amber-600" />}
+                    {isRelay ? 'Relay Shift Legs (Driver Working-Hour Hand-Off)' : 'Parallel Load-Split Portions'}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {matchingAssignments.map((a, idx) => (
+                      <div key={a.id || idx} className="rounded-lg bg-white p-3 border border-base-700 shadow-sm text-xs space-y-1">
+                        <div className="flex justify-between items-center font-bold text-gray-800">
+                          <span>
+                            {isRelay ? `Leg ${a.relay_leg || idx + 1} of ${a.relay_total_legs || 2}` : `Portion ${a.split_index || idx + 1} of ${a.split_total || matchingAssignments.length}`}
+                          </span>
+                          <span className="font-mono text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                            {a.lorry_id} ({a.driver_name || 'Driver'})
+                          </span>
+                        </div>
+                        {isRelay && (
+                          <div className="text-gray-600">
+                            <span className="font-medium">Handoff Hub:</span> {a.relay_point_name || 'Midpoint Hub'}
+                          </div>
+                        )}
+                        <div className="text-gray-600 flex justify-between">
+                          <span>
+                            Load: {a.split_weight_kg ? `${formatNumber(a.split_weight_kg)} kg` : `${formatNumber(s.weight_kg)} kg`}
+                          </span>
+                          <span>ETA: {a.eta ? formatTime(a.eta) : '—'}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            )}
+          </>
+        );
       })}
       {filtered.length === 0 && <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500"><Package size={32} className="mx-auto mb-2 opacity-40" />No shipments found.</td></tr>}
     </tbody></table></div></div>

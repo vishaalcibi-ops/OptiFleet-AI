@@ -917,11 +917,18 @@ export const useStore = create<AppState>((set, get) => ({
       throw new Error('Settings not loaded');
     }
 
-    // Only pending or unassigned shipments enter the new assignment run
-    const workShipments = shipments.filter((s) => {
+    // Filter pending/unassigned shipments, or all non-delivered shipments if re-optimizing active fleet
+    const pendingOrUnassigned = shipments.filter((s) => {
       const status = s.shipment_status ?? s.status;
       return status === 'pending' || status === 'unassigned';
     });
+    const workShipments = pendingOrUnassigned.length > 0
+      ? pendingOrUnassigned
+      : shipments.filter((s) => (s.shipment_status ?? s.status) !== 'delivered');
+
+    if (workShipments.length === 0) {
+      workShipments.push(...shipments);
+    }
     set({ optimizing: true, error: null, progressMessage: 'Analyzing fleet...' });
 
     const stages = ['Analyzing fleet...', 'Checking capacity...', 'Prioritizing by deadline...', 'Grouping compatible shipments...', 'Calculating routes...', 'Calculating fuel...', 'Checking deadlines...', 'Optimizing transportation cost...', 'Generating final plan...'];
@@ -932,7 +939,7 @@ export const useStore = create<AppState>((set, get) => ({
 
     try {
       const beforeSummary = opts?.beforeSummary ? computeBeforeSummary(lorries, workShipments, settings) : null;
-      const result = optimize({ lorries, shipments: workShipments, settings, before_summary: beforeSummary });
+      const result = optimize({ lorries, shipments: workShipments, settings, locations: get().locations, before_summary: beforeSummary });
 
       if (opts?.saveToDb) {
         // Always create a local run record first (works offline)
@@ -952,31 +959,45 @@ export const useStore = create<AppState>((set, get) => ({
         result.run_id = localRunId;
 
         const assignmentRows: Assignment[] = result.plans.flatMap((p) =>
-          p.sequence.map((ps) => ({
-            id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            optimization_run_id: localRunId,
-            lorry_id: p.lorry.lorry_id,
-            shipment_id: ps.shipment.shipment_id,
-            driver_name: p.lorry.driver_name ?? null,
-            delivery_sequence: ps.sequence,
-            distance_km: ps.cumulative_distance_km,
-            travel_time_minutes: ps.cumulative_time_minutes,
-            fuel_litres: p.total_fuel_litres / Math.max(1, p.sequence.length),
-            fuel_cost: p.total_fuel_cost / Math.max(1, p.sequence.length),
-            total_cost: p.total_cost / Math.max(1, p.sequence.length),
-            eta: ps.eta.toISOString(),
-            deadline: ps.deadline.toISOString(),
-            deadline_status: ps.deadline_status,
-            group_id: p.group_id,
-            route_summary: null,
-            split_index: p.split_index ?? null,
-            split_total: p.split_total ?? null,
-            parent_shipment_id: p.is_split ? p.split_shipment_id ?? ps.shipment.shipment_id : null,
-            split_weight_kg: p.split_portion_weight_kg ?? null,
-            split_volume_m3: p.split_portion_volume_m3 ?? null,
-            split_portion_weight_kg: p.split_portion_weight_kg ?? null,
-            split_portion_volume_m3: p.split_portion_volume_m3 ?? null,
-          }))
+          p.sequence.map((ps) => {
+            const effectiveShipmentId = p.is_relay
+              ? (p.relay_shipment_id || ps.shipment.shipment_id.replace(/-L[12]$/, ''))
+              : ps.shipment.shipment_id;
+            return {
+              id: `a-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              optimization_run_id: localRunId,
+              lorry_id: p.lorry.lorry_id,
+              shipment_id: effectiveShipmentId,
+              driver_name: p.lorry.driver_name ?? null,
+              delivery_sequence: ps.sequence,
+              distance_km: ps.cumulative_distance_km,
+              travel_time_minutes: ps.cumulative_time_minutes,
+              fuel_litres: p.total_fuel_litres / Math.max(1, p.sequence.length),
+              fuel_cost: p.total_fuel_cost / Math.max(1, p.sequence.length),
+              total_cost: p.total_cost / Math.max(1, p.sequence.length),
+              eta: ps.eta.toISOString(),
+              deadline: ps.deadline.toISOString(),
+              deadline_status: ps.deadline_status,
+              group_id: p.group_id,
+              route_summary: null,
+              split_index: p.split_index ?? null,
+              split_total: p.split_total ?? null,
+              parent_shipment_id: p.is_split
+                ? (p.split_shipment_id ?? ps.shipment.shipment_id)
+                : p.is_relay
+                ? (p.relay_shipment_id ?? ps.shipment.shipment_id)
+                : null,
+              split_weight_kg: p.split_portion_weight_kg ?? null,
+              split_volume_m3: p.split_portion_volume_m3 ?? null,
+              split_portion_weight_kg: p.split_portion_weight_kg ?? null,
+              split_portion_volume_m3: p.split_portion_volume_m3 ?? null,
+              is_relay: p.is_relay ?? false,
+              relay_leg: p.relay_leg ?? null,
+              relay_total_legs: p.relay_total_legs ?? null,
+              relay_shipment_id: p.relay_shipment_id ?? null,
+              relay_point_name: p.relay_point_name ?? null,
+            };
+          })
         );
 
         const rejectionRows: RejectionReason[] = result.unassigned.flatMap((u) =>
@@ -1000,10 +1021,15 @@ export const useStore = create<AppState>((set, get) => ({
 
           for (const plan of result.plans) {
             const isFirstSplit = !plan.is_split || plan.split_index === 1;
+            const isFirstRelay = !plan.is_relay || plan.relay_leg === 1;
             for (const planned of plan.sequence) {
-              if (isFirstSplit || !plan.is_split) {
+              const baseShipmentId = plan.is_relay
+                ? (plan.relay_shipment_id || planned.shipment.shipment_id.replace(/-L[12]$/, ''))
+                : planned.shipment.shipment_id;
+
+              if (isFirstSplit && isFirstRelay) {
                 updatedShipments = updatedShipments.map((s) =>
-                  s.shipment_id === planned.shipment.shipment_id
+                  s.shipment_id === baseShipmentId
                     ? { ...s, shipment_status: 'active' as const, status: 'active' as const, assigned_lorry_id: plan.lorry.lorry_id, assigned_driver_name: plan.lorry.driver_name ?? null, updated_at: now }
                     : s
                 );
@@ -1014,8 +1040,11 @@ export const useStore = create<AppState>((set, get) => ({
           updatedLorries = updatedLorries.map((l) => {
             if (usedLorryIds.has(l.lorry_id)) {
               const plan = result.plans.find((p) => p.lorry.lorry_id === l.lorry_id);
-              const firstShipmentId = plan?.sequence[0]?.shipment.shipment_id ?? null;
-              return { ...l, assignment_status: 'assigned' as const, current_shipment_id: firstShipmentId, updated_at: now };
+              const firstShipment = plan?.sequence[0]?.shipment;
+              const effectiveId = plan?.is_relay
+                ? (plan.relay_shipment_id || firstShipment?.shipment_id.replace(/-L[12]$/, '') || null)
+                : (firstShipment?.shipment_id ?? null);
+              return { ...l, assignment_status: 'assigned' as const, current_shipment_id: effectiveId, updated_at: now };
             }
             return l;
           });

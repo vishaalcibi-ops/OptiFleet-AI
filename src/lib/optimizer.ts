@@ -13,6 +13,7 @@ import type {
   BeforeAfterSummary,
   DeadlineStatus,
   Priority,
+  Location,
 } from '@/types';
 import { PRIORITY_WEIGHT } from '@/types';
 
@@ -564,6 +565,231 @@ function trySplitShipment(
   return assignments;
 }
 
+// ============ RELAY ASSIGNMENT LOGIC (Feature 1: Driver Working-Hour Limits) ============
+
+export const DEFAULT_RELAY_CITIES: GeoPoint[] = [
+  { name: 'Salem', lat: 11.6643, lng: 78.146 },
+  { name: 'Dharmapuri', lat: 12.1211, lng: 78.1582 },
+  { name: 'Krishnagiri', lat: 12.5186, lng: 78.2138 },
+  { name: 'Hosur', lat: 12.7409, lng: 77.8253 },
+  { name: 'Bengaluru', lat: 12.9716, lng: 77.5946 },
+  { name: 'Tiruchirappalli', lat: 10.7905, lng: 78.7047 },
+  { name: 'Madurai', lat: 9.9252, lng: 78.1198 },
+  { name: 'Dindigul', lat: 10.3673, lng: 77.9803 },
+  { name: 'Karur', lat: 10.9601, lng: 78.0766 },
+  { name: 'Namakkal', lat: 11.2189, lng: 78.1674 },
+  { name: 'Erode', lat: 11.341, lng: 77.7172 },
+  { name: 'Tiruppur', lat: 11.1085, lng: 77.3411 },
+  { name: 'Coimbatore', lat: 11.0168, lng: 76.9558 },
+  { name: 'Vellore', lat: 12.9165, lng: 79.1325 },
+  { name: 'Kanchipuram', lat: 12.8342, lng: 79.7036 },
+  { name: 'Chengalpattu', lat: 12.6841, lng: 79.9836 },
+  { name: 'Chennai', lat: 13.0827, lng: 80.2707 },
+  { name: 'Viluppuram', lat: 11.9401, lng: 79.4861 },
+  { name: 'Cuddalore', lat: 11.748, lng: 79.7714 },
+  { name: 'Perambalur', lat: 11.2342, lng: 78.882 },
+  { name: 'Thanjavur', lat: 10.787, lng: 79.1378 },
+  { name: 'Pudukkottai', lat: 10.3797, lng: 78.8208 },
+  { name: 'Virudhunagar', lat: 9.568, lng: 77.9624 },
+  { name: 'Tirunelveli', lat: 8.7139, lng: 77.7567 },
+  { name: 'Thoothukudi', lat: 8.7642, lng: 78.1348 },
+  { name: 'Kanyakumari', lat: 8.1833, lng: 77.4119 },
+  { name: 'Theni', lat: 10.0104, lng: 77.4768 },
+  { name: 'Tenkasi', lat: 8.9594, lng: 77.316 },
+  { name: 'Ramanathapuram', lat: 9.3639, lng: 78.8395 },
+  { name: 'Sivaganga', lat: 9.8433, lng: 78.4809 },
+  { name: 'Tiruvannamalai', lat: 12.2253, lng: 79.0747 },
+  { name: 'Tirupathur', lat: 12.4964, lng: 78.5739 },
+  { name: 'Ranipet', lat: 12.9272, lng: 79.3333 },
+  { name: 'Tiruvallur', lat: 13.1437, lng: 79.9079 },
+  { name: 'Ariyalur', lat: 11.1401, lng: 79.0786 },
+  { name: 'Kallakurichi', lat: 11.7384, lng: 78.9639 },
+  { name: 'Mayiladuthurai', lat: 11.1075, lng: 79.6524 },
+  { name: 'Nagapattinam', lat: 10.7672, lng: 79.8449 },
+  { name: 'Tiruvarur', lat: 10.7725, lng: 79.6365 },
+  { name: 'Nilgiris', lat: 11.4102, lng: 76.695 },
+  { name: 'Kangeyam', lat: 11.0055, lng: 77.5614 },
+];
+
+export function findRelayPoint(
+  pickup: GeoPoint,
+  destination: GeoPoint,
+  candidateCities: GeoPoint[],
+  settings: OptimizationSettings
+): GeoPoint {
+  const midLat = (pickup.lat + destination.lat) / 2;
+  const midLng = (pickup.lng + destination.lng) / 2;
+  const directDist = distanceBetween(pickup, destination);
+  const maxMinutes = 9 * 60;
+
+  const validCandidates = candidateCities.filter((c) => {
+    const d1 = distanceBetween(pickup, c);
+    const d2 = distanceBetween(c, destination);
+    if (d1 < 15 || d2 < 15) return false;
+    if (d1 + d2 > directDist * 1.6) return false;
+    const t1 = travelTimeMinutes(d1, settings);
+    const t2 = travelTimeMinutes(d2, settings);
+    return t1 <= maxMinutes && t2 <= maxMinutes;
+  });
+
+  if (validCandidates.length > 0) {
+    validCandidates.sort((a, b) => {
+      const distA = haversineDistance(midLat, midLng, a.lat, a.lng);
+      const distB = haversineDistance(midLat, midLng, b.lat, b.lng);
+      return distA - distB;
+    });
+    return {
+      name: `${validCandidates[0].name} Relay Hub`,
+      lat: validCandidates[0].lat,
+      lng: validCandidates[0].lng,
+    };
+  }
+
+  return {
+    name: 'Relay Point',
+    lat: midLat,
+    lng: midLng,
+  };
+}
+
+export interface RelayAssignment {
+  relay_leg: number;
+  relay_total_legs: number;
+  relay_shipment_id: string;
+  relay_point: GeoPoint;
+  lorry: Lorry;
+  plan: LorryPlan;
+}
+
+export function tryRelayAssignment(
+  shipment: Shipment,
+  availableLorries: Lorry[],
+  settings: OptimizationSettings,
+  locations?: Location[]
+): RelayAssignment[] | null {
+  const capableLorries = availableLorries.filter(
+    (l) =>
+      l.status === 'active' &&
+      (l.driver_available ?? true) &&
+      l.maximum_weight_capacity_kg >= shipment.weight_kg &&
+      l.maximum_volume_capacity_m3 >= shipment.volume_m3
+  );
+
+  if (capableLorries.length < 2) return null;
+
+  const pickup: GeoPoint = {
+    name: shipment.pickup_location_name,
+    lat: shipment.pickup_latitude,
+    lng: shipment.pickup_longitude,
+  };
+  const destination: GeoPoint = {
+    name: shipment.destination_name,
+    lat: shipment.destination_latitude,
+    lng: shipment.destination_longitude,
+  };
+
+  const fitsDirectOnAny = capableLorries.some((l) => {
+    const maxM = (l.max_driving_hours_per_day ?? 9) * 60;
+    const plan = buildLorryPlan(l, [shipment], settings);
+    return plan.total_travel_time_minutes <= maxM;
+  });
+  if (fitsDirectOnAny) return null;
+
+  const candidateCities: GeoPoint[] = [...DEFAULT_RELAY_CITIES];
+  if (locations && locations.length > 0) {
+    for (const loc of locations) {
+      if (!candidateCities.some((c) => c.name.toLowerCase() === loc.name.toLowerCase())) {
+        candidateCities.push({ name: loc.name, lat: loc.latitude, lng: loc.longitude });
+      }
+    }
+  }
+
+  const relayPoint = findRelayPoint(pickup, destination, candidateCities, settings);
+
+  const leg1Shipment: Shipment = {
+    ...shipment,
+    id: `${shipment.id}-leg1`,
+    shipment_id: `${shipment.shipment_id}-L1`,
+    destination_name: relayPoint.name,
+    destination_latitude: relayPoint.lat,
+    destination_longitude: relayPoint.lng,
+  };
+
+  const leg2Shipment: Shipment = {
+    ...shipment,
+    id: `${shipment.id}-leg2`,
+    shipment_id: `${shipment.shipment_id}-L2`,
+    pickup_location_name: relayPoint.name,
+    pickup_latitude: relayPoint.lat,
+    pickup_longitude: relayPoint.lng,
+  };
+
+  let bestLeg1: { lorry: Lorry; plan: LorryPlan } | null = null;
+  let bestLeg1Cost = Infinity;
+
+  for (const lorry of capableLorries) {
+    const maxM = (lorry.max_driving_hours_per_day ?? 9) * 60;
+    const plan = buildLorryPlan(lorry, [leg1Shipment], settings);
+    if (plan.total_travel_time_minutes <= maxM) {
+      if (plan.total_cost < bestLeg1Cost) {
+        bestLeg1Cost = plan.total_cost;
+        bestLeg1 = { lorry, plan };
+      }
+    }
+  }
+
+  if (!bestLeg1) return null;
+
+  const remainingLorries = capableLorries.filter((l) => l.lorry_id !== bestLeg1!.lorry.lorry_id);
+  let bestLeg2: { lorry: Lorry; plan: LorryPlan } | null = null;
+  let bestLeg2Cost = Infinity;
+
+  for (const lorry of remainingLorries) {
+    const maxM = (lorry.max_driving_hours_per_day ?? 9) * 60;
+    const plan = buildLorryPlan(lorry, [leg2Shipment], settings);
+    if (plan.total_travel_time_minutes <= maxM) {
+      if (plan.total_cost < bestLeg2Cost) {
+        bestLeg2Cost = plan.total_cost;
+        bestLeg2 = { lorry, plan };
+      }
+    }
+  }
+
+  if (!bestLeg2) return null;
+
+  const leg1Arrival = bestLeg1.plan.latest_eta || new Date(Date.now() + bestLeg1.plan.total_travel_time_minutes * 60000);
+  const leg2StartTime = new Date(leg1Arrival.getTime() + 30 * 60000);
+  const leg2DurationMs = bestLeg2.plan.total_travel_time_minutes * 60000;
+  const leg2Eta = new Date(leg2StartTime.getTime() + leg2DurationMs);
+  const deadline = new Date(shipment.delivery_deadline);
+
+  if (bestLeg2.plan.sequence.length > 0) {
+    bestLeg2.plan.sequence[0].eta = leg2Eta;
+    bestLeg2.plan.sequence[0].deadline_status = leg2Eta <= deadline ? 'ON_TIME' : 'LATE';
+    bestLeg2.plan.latest_eta = leg2Eta;
+    bestLeg2.plan.worst_deadline_status = leg2Eta <= deadline ? 'ON_TIME' : 'LATE';
+  }
+
+  return [
+    {
+      relay_leg: 1,
+      relay_total_legs: 2,
+      relay_shipment_id: shipment.shipment_id,
+      relay_point: relayPoint,
+      lorry: bestLeg1.lorry,
+      plan: bestLeg1.plan,
+    },
+    {
+      relay_leg: 2,
+      relay_total_legs: 2,
+      relay_shipment_id: shipment.shipment_id,
+      relay_point: relayPoint,
+      lorry: bestLeg2.lorry,
+      plan: bestLeg2.plan,
+    },
+  ];
+}
+
 // ============ GLOBAL OPTIMIZATION ============
 //
 // Strategy:
@@ -579,6 +805,7 @@ export interface OptimizationInput {
   lorries: Lorry[];
   shipments: Shipment[];
   settings: OptimizationSettings;
+  locations?: Location[];
   before_summary?: BeforeAfterSummary | null;
 }
 
@@ -805,30 +1032,52 @@ export function optimize(input: OptimizationInput): OptimizationResult {
           const comp = singleComparisons.find((c) => c.lorry_id === bestSingle.lorry.lorry_id);
           if (comp) comp.selected = true;
         } else {
-          // Feature 2: Try split shipment before giving up
-          const availableForSplit = activeLorries.filter((l) => !usedLorries.has(l.lorry_id));
-          const splitResult = trySplitShipment(s, availableForSplit, settings);
+          // Feature 1: Try Relay assignment for long-distance routes (> 9 hours)
+          const availableForRelay = activeLorries.filter((l) => !usedLorries.has(l.lorry_id));
+          const relayResult = tryRelayAssignment(s, availableForRelay, settings, input.locations);
 
-          if (splitResult && splitResult.length > 0) {
-            // Successfully split across multiple lorries
-            for (const split of splitResult) {
-              const splitPlan: LorryPlan = {
-                ...split.plan,
-                is_split: true,
-                split_shipment_id: s.shipment_id,
-                split_index: split.split_index,
-                split_total: split.split_total,
-                split_portion_weight_kg: split.portion_weight_kg,
-                split_portion_volume_m3: split.portion_volume_m3,
-                used_weight_kg: split.portion_weight_kg,
-                used_volume_m3: split.portion_volume_m3,
-                group_id: `${s.shipment_id}-split-${split.split_index}`,
+          if (relayResult && relayResult.length > 0) {
+            for (const relay of relayResult) {
+              const relayPlan: LorryPlan = {
+                ...relay.plan,
+                is_relay: true,
+                relay_leg: relay.relay_leg,
+                relay_total_legs: relay.relay_total_legs,
+                relay_shipment_id: s.shipment_id,
+                relay_point_name: relay.relay_point.name,
+                relay_point_lat: relay.relay_point.lat,
+                relay_point_lng: relay.relay_point.lng,
+                group_id: `${s.shipment_id}-relay-leg-${relay.relay_leg}`,
               };
-              usedLorries.add(split.lorry.lorry_id);
-              plans.push(splitPlan);
+              usedLorries.add(relay.lorry.lorry_id);
+              plans.push(relayPlan);
             }
             assignedShipments.add(s.shipment_id);
           } else {
+            // Feature 2: Try split shipment before giving up
+            const availableForSplit = activeLorries.filter((l) => !usedLorries.has(l.lorry_id));
+            const splitResult = trySplitShipment(s, availableForSplit, settings);
+
+            if (splitResult && splitResult.length > 0) {
+              // Successfully split across multiple lorries
+              for (const split of splitResult) {
+                const splitPlan: LorryPlan = {
+                  ...split.plan,
+                  is_split: true,
+                  split_shipment_id: s.shipment_id,
+                  split_index: split.split_index,
+                  split_total: split.split_total,
+                  split_portion_weight_kg: split.portion_weight_kg,
+                  split_portion_volume_m3: split.portion_volume_m3,
+                  used_weight_kg: split.portion_weight_kg,
+                  used_volume_m3: split.portion_volume_m3,
+                  group_id: `${s.shipment_id}-split-${split.split_index}`,
+                };
+                usedLorries.add(split.lorry.lorry_id);
+                plans.push(splitPlan);
+              }
+              assignedShipments.add(s.shipment_id);
+            } else {
             // Truly unassigned — collect rejection reasons from ALL lorries (including non-active)
             const reasons: UnassignedShipment['reasons'] = [];
 
@@ -863,6 +1112,7 @@ export function optimize(input: OptimizationInput): OptimizationResult {
       }
     }
   }
+}
 
   // Calculate totals
   const total_cost = sum(plans.map((p) => p.total_cost));

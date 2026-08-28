@@ -123,6 +123,10 @@ export function Map({ lorries, shipments, plans, latestAssignmentRoutes = [] }: 
         <span className="fleet-map-status-dot" style={{ backgroundColor: '#dc2626', border: '1px solid #fef08a' }} />
         🚨 Breakdown SOS
       </span>
+      <span className="fleet-map-legend-item">
+        <span className="fleet-map-status-dot" style={{ backgroundColor: '#9333ea', border: '2px solid #ffffff' }} />
+        🔄 Relay Handoff Hub
+      </span>
       <span className="fleet-map-live-indicator text-gray-500">Positions from last sync</span>
     </div>
     <MapContainer center={[13.0827, 80.2707]} zoom={11} scrollWheelZoom className="fleet-leaflet-map">
@@ -134,9 +138,9 @@ export function Map({ lorries, shipments, plans, latestAssignmentRoutes = [] }: 
           key={route.id}
           positions={route.points}
           pathOptions={{
-            color: index === 0 ? '#0284c7' : '#f59e0b',
-            weight: index === 0 ? 5 : 3,
-            opacity: index === 0 ? 0.95 : 0.65,
+            color: index === 0 ? '#0284c7' : index === 1 ? '#9333ea' : '#f59e0b',
+            weight: index === 0 ? 5 : 4,
+            opacity: index === 0 ? 0.95 : 0.85,
             dashArray: index === 0 ? undefined : '6 6',
           }}
         />
@@ -150,6 +154,25 @@ export function Map({ lorries, shipments, plans, latestAssignmentRoutes = [] }: 
           <Popup><strong>{stop.label}</strong><br />Location: {stop.detail}</Popup>
         </CircleMarker>
       ))}
+
+      {plans
+        .filter((p) => p.is_relay && p.relay_point_lat && p.relay_point_lng)
+        .map((p) => (
+          <CircleMarker
+            key={`${p.group_id}-relay-point`}
+            center={[p.relay_point_lat!, p.relay_point_lng!]}
+            radius={10}
+            pathOptions={{ color: '#ffffff', fillColor: '#9333ea', fillOpacity: 1, weight: 3 }}
+          >
+            <Popup>
+              <strong>🔄 Relay Hub: {p.relay_point_name || 'Handoff Point'}</strong>
+              <br />
+              Shipment: {p.relay_shipment_id || p.split_shipment_id || 'Relay'}
+              <br />
+              Leg {p.relay_leg} of {p.relay_total_legs || 2} (Driver: {p.lorry.driver_name})
+            </Popup>
+          </CircleMarker>
+        ))}
 
       {lorries.map((lorry) => {
         const visualState = getVisualState(lorry);

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { Truck, Navigation, AlertCircle, CheckCircle2, AlertOctagon, Check, Package, MapPin, Flag } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import type { Lorry, Shipment } from '@/types';
+import type { Lorry, Shipment, Assignment } from '@/types';
 
 interface DriverTrackProps {
   token?: string;
@@ -27,13 +27,14 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
   const [tokenInfo, setTokenInfo] = useState<{ token: string; lorryId: string; shipmentId: string } | null>(null);
   const [lorry, setLorry] = useState<Lorry | null>(null);
   const [shipment, setShipment] = useState<Shipment | null>(null);
+  const [assignment, setAssignment] = useState<Assignment | null>(null);
 
   const [status, setStatus] = useState<'requesting' | 'sharing' | 'denied' | 'error'>('requesting');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   
-  const [actionDone, setActionDone] = useState<'breakdown' | 'delivered' | null>(null);
+  const [actionDone, setActionDone] = useState<'breakdown' | 'delivered' | 'relay_handoff' | null>(null);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [showBreakdownConfirm, setShowBreakdownConfirm] = useState<boolean>(false);
   const [showDeliveredConfirm, setShowDeliveredConfirm] = useState<boolean>(false);
@@ -66,10 +67,11 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
         const resolvedLorryId = linkData?.lorry_id || (urlToken.length <= 6 ? urlToken : 'L01');
         const resolvedShipmentId = linkData?.shipment_id || 'S001';
 
-        // Fetch linked shipment & lorry details
-        const [lorryRes, shipmentRes] = await Promise.all([
+        // Fetch linked shipment, lorry & assignment details
+        const [lorryRes, shipmentRes, assignmentRes] = await Promise.all([
           supabase.from('lorries').select('*').eq('lorry_id', resolvedLorryId).maybeSingle(),
           supabase.from('shipments').select('*').eq('shipment_id', resolvedShipmentId).maybeSingle(),
+          supabase.from('assignments').select('*').eq('lorry_id', resolvedLorryId).order('id', { ascending: false }).limit(1).maybeSingle(),
         ]);
 
         if (isMounted) {
@@ -80,6 +82,7 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
           });
           if (lorryRes.data) setLorry(lorryRes.data as Lorry);
           if (shipmentRes.data) setShipment(shipmentRes.data as Shipment);
+          if (assignmentRes.data) setAssignment(assignmentRes.data as Assignment);
           setIsExpired(false);
           setLoading(false);
         }
@@ -206,27 +209,45 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
     setActionLoading(true);
     const now = new Date().toISOString();
     try {
-      // 1. Try RPC driver_mark_delivered
-      const { error: rpcErr } = await supabase.rpc('driver_mark_delivered', { p_token: tokenInfo.token });
+      const isRelayLeg1 = assignment?.is_relay && (assignment?.relay_leg === 1);
 
-      if (rpcErr) {
-        // Fallback updates
-        const destName = shipment?.destination_name || 'Destination';
-        const destLat = shipment?.destination_latitude || lorry?.current_latitude || 13.0827;
-        const destLng = shipment?.destination_longitude || lorry?.current_longitude || 80.2707;
-
+      if (isRelayLeg1) {
+        // Relay Leg 1 handoff logic
+        const handoffName = assignment?.relay_point_name || 'Intermediate Relay Hub';
         await Promise.all([
-          supabase.from('shipments').update({ shipment_status: 'delivered', status: 'delivered', updated_at: now }).eq('shipment_id', tokenInfo.shipmentId),
           supabase.from('lorries').update({
-            current_location_name: destName, current_latitude: destLat, current_longitude: destLng,
-            assignment_status: 'available', current_shipment_id: null, last_gps_latitude: destLat, last_gps_longitude: destLng, last_gps_updated_at: now, updated_at: now,
+            current_location_name: handoffName,
+            assignment_status: 'available',
+            current_shipment_id: null,
+            updated_at: now,
           }).eq('lorry_id', tokenInfo.lorryId),
           supabase.from('driver_tracking_links').update({ expired_at: now }).eq('tracking_token', tokenInfo.token),
         ]);
-      }
+        setActionDone('relay_handoff');
+        setShowDeliveredConfirm(false);
+      } else {
+        // 1. Try RPC driver_mark_delivered
+        const { error: rpcErr } = await supabase.rpc('driver_mark_delivered', { p_token: tokenInfo.token });
 
-      setActionDone('delivered');
-      setShowDeliveredConfirm(false);
+        if (rpcErr) {
+          // Fallback updates
+          const destName = shipment?.destination_name || 'Destination';
+          const destLat = shipment?.destination_latitude || lorry?.current_latitude || 13.0827;
+          const destLng = shipment?.destination_longitude || lorry?.current_longitude || 80.2707;
+
+          await Promise.all([
+            supabase.from('shipments').update({ shipment_status: 'delivered', status: 'delivered', updated_at: now }).eq('shipment_id', tokenInfo.shipmentId),
+            supabase.from('lorries').update({
+              current_location_name: destName, current_latitude: destLat, current_longitude: destLng,
+              assignment_status: 'available', current_shipment_id: null, last_gps_latitude: destLat, last_gps_longitude: destLng, last_gps_updated_at: now, updated_at: now,
+            }).eq('lorry_id', tokenInfo.lorryId),
+            supabase.from('driver_tracking_links').update({ expired_at: now }).eq('tracking_token', tokenInfo.token),
+          ]);
+        }
+
+        setActionDone('delivered');
+        setShowDeliveredConfirm(false);
+      }
     } catch (err) {
       console.error('Mark delivered error:', err);
       alert('Could not update status. Please check your internet connection.');
@@ -273,14 +294,29 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
                 </span>
               )}
             </div>
+
+            {assignment?.is_relay && (
+              <div className="bg-purple-950/60 border border-purple-500/30 rounded-xl px-3 py-1.5 text-xs text-purple-300 flex items-center justify-between font-semibold">
+                <span>🔄 Relay Leg {assignment.relay_leg || 1} of {assignment.relay_total_legs || 2}</span>
+                <span>Handoff: {assignment.relay_point_name || 'Intermediate Hub'}</span>
+              </div>
+            )}
+
+            {assignment?.split_index && (
+              <div className="bg-amber-950/60 border border-amber-500/30 rounded-xl px-3 py-1.5 text-xs text-amber-300 flex items-center justify-between font-semibold">
+                <span>Load Portion {assignment.split_index} of {assignment.split_total || 2}</span>
+                <span>{assignment.split_weight_kg ? `${assignment.split_weight_kg} kg` : ''}</span>
+              </div>
+            )}
+
             <div className="space-y-1 pt-1 border-t border-slate-800 text-xs">
               <div className="flex items-center gap-2 text-emerald-400 font-medium">
                 <MapPin size={14} className="shrink-0" />
-                <span><strong>Pickup:</strong> {shipment?.pickup_location_name || 'Loading Point'}</span>
+                <span><strong>Pickup:</strong> {assignment?.is_relay && assignment?.relay_leg === 2 ? assignment?.relay_point_name || 'Relay Hub' : shipment?.pickup_location_name || 'Loading Point'}</span>
               </div>
               <div className="flex items-center gap-2 text-rose-400 font-medium">
                 <Flag size={14} className="shrink-0" />
-                <span><strong>Destination:</strong> {shipment?.destination_name || 'Delivery Point'}</span>
+                <span><strong>Destination:</strong> {assignment?.is_relay && assignment?.relay_leg === 1 ? assignment?.relay_point_name || 'Relay Hub' : shipment?.destination_name || 'Delivery Point'}</span>
               </div>
             </div>
           </div>
@@ -334,6 +370,16 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
             <h3 className="text-lg font-bold text-red-400">Reported. Fleet team has been alerted.</h3>
             <p className="text-xs text-slate-300">
               Your breakdown report has been dispatched to the fleet manager dashboard. Help is on the way.
+            </p>
+          </div>
+        )}
+
+        {actionDone === 'relay_handoff' && (
+          <div className="p-6 rounded-2xl bg-purple-950/50 border border-purple-500/50 space-y-2 text-center">
+            <CheckCircle2 size={40} className="text-purple-400 animate-bounce mx-auto" />
+            <h3 className="text-xl font-bold text-purple-400">Leg 1 Complete!</h3>
+            <p className="text-xs text-slate-300">
+              Handed off at {assignment?.relay_point_name || 'Relay Point'}. Leg 2 driver has been notified to pick up the shipment.
             </p>
           </div>
         )}
