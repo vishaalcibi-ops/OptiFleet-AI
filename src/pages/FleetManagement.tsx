@@ -190,7 +190,7 @@ export function FleetManagement() {
             </thead>
             <tbody className="divide-y divide-base-700/40">
               {filtered.map((l) => {
-                const isLorryInBreakdown = l.is_breakdown || breakdownLorries.some((b) => b.lorry_id === l.lorry_id);
+                const isLorryInBreakdown = l.status === 'maintenance' || Boolean(l.is_breakdown) || breakdownLorries.some((b) => b.lorry_id === l.lorry_id);
                 return (
                   <tr key={l.id} className={`hover:bg-base-800/30 transition-colors ${isLorryInBreakdown ? 'bg-red-500/10' : ''}`}>
                     <td className="px-4 py-3 font-mono font-semibold text-accent-300">

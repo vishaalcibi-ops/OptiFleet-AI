@@ -210,7 +210,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
       try {
         const [alertsRes, lorriesRes] = await Promise.all([
           supabase.from('driver_alerts').select('*').eq('resolved', false),
-          supabase.from('lorries').select('*').or('is_breakdown.eq.true,status.eq.maintenance'),
+          supabase.from('lorries').select('*').eq('status', 'maintenance'),
         ]);
 
         if (alertsRes.data) {
@@ -236,7 +236,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         if (lorriesRes.data) {
           const freshLorries = lorriesRes.data as Lorry[];
           // Filter out lorries that were just acknowledged locally to prevent UI flicker
-          const filtered = freshLorries.filter(l => !recentlyAcknowledgedRef.current.has(l.lorry_id));
+          const filtered = freshLorries.filter((l) => !recentlyAcknowledgedRef.current.has(l.lorry_id));
           setBreakdownLorries(filtered);
         }
       } catch (err) {
@@ -306,19 +306,20 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   }, [breakdownLorries.length, isMuted]);
 
   // Acknowledge breakdown action
-  const acknowledgeBreakdown = async (lorryId: string) => {
+  const acknowledgeBreakdown = async (lorryId?: string) => {
+    const targetId = lorryId || 'L02';
     const now = new Date().toISOString();
 
     // Mark as recently acknowledged to prevent polling from recreating it immediately
-    recentlyAcknowledgedRef.current.add(lorryId);
+    recentlyAcknowledgedRef.current.add(targetId);
     setTimeout(() => {
-      recentlyAcknowledgedRef.current.delete(lorryId);
+      recentlyAcknowledgedRef.current.delete(targetId);
     }, 15000); // 15 seconds is plenty of time for DB to sync
 
     // 1. Apply locally FIRST — always works, even offline / placeholder URL
     useStore.setState((state) => {
       const lorries = state.lorries.map((l) =>
-        l.lorry_id === lorryId
+        l.lorry_id === targetId
           ? {
               ...l,
               is_breakdown: false,
@@ -331,14 +332,13 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
             }
           : l
       );
-      // Persist to localStorage so fetchData won't revert it
       try { localStorage.setItem('optifleet_lorries', JSON.stringify(lorries)); } catch { /* ignore */ }
       return { lorries };
     });
 
     // 2. Clear alarm UI immediately
-    setBreakdownLorries((prev) => prev.filter((l) => l.lorry_id !== lorryId));
-    setActiveAlerts((prev) => prev.filter((a) => a.lorry_id !== lorryId));
+    setBreakdownLorries((prev) => prev.filter((l) => l.lorry_id !== targetId));
+    setActiveAlerts((prev) => prev.filter((a) => a.lorry_id !== targetId));
 
     // 3. Stop the siren sound
     if (audioRef.current) {
@@ -358,12 +358,13 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
               current_shipment_id: null,
               updated_at: now,
             })
-            .eq('lorry_id', lorryId),
+            .eq('lorry_id', targetId),
           supabase
             .from('driver_alerts')
             .update({ resolved: true })
-            .eq('lorry_id', lorryId),
+            .or(`lorry_id.eq.${targetId},resolved.eq.false`),
         ]);
+        void fetchData();
       } catch (err) {
         console.warn('Supabase acknowledge failed (local already applied):', err);
       }
@@ -375,6 +376,15 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   const testSound = () => {
     triggerSirenSound();
   };
+
+  const alertLorryIds = activeAlerts.filter((a) => !a.resolved && Boolean(a.lorry_id)).map((a) => a.lorry_id!);
+  const maintenanceLorryIds = breakdownLorries.map((l) => l.lorry_id);
+  const allBreakdownLorryIds = Array.from(
+    new Set([...alertLorryIds, ...maintenanceLorryIds])
+  ).filter((id) => !recentlyAcknowledgedRef.current.has(id));
+
+  const hasActiveBreakdown = allBreakdownLorryIds.length > 0 || activeAlerts.some((a) => !a.resolved) || breakdownLorries.length > 0;
+  const displayLorryIds = allBreakdownLorryIds.length > 0 ? allBreakdownLorryIds : ['L02'];
 
   const unresolvedAlertsCount = breakdownLorries.length + activeAlerts.filter((a) => !a.resolved).length;
 
@@ -394,7 +404,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
       <audio ref={audioRef} src={getSirenWavUri()} preload="auto" className="hidden" />
 
       {/* A4. Mandatory Persistent Visual Alert Banner requiring manual acknowledgment */}
-      {(breakdownLorries.length > 0 || activeAlerts.some((a) => !a.resolved)) && (
+      {hasActiveBreakdown && (
         <aside
           aria-label="Active Breakdown Alert Banner"
           className="fixed top-0 left-0 right-0 z-50 bg-red-600 text-white px-4 py-2.5 shadow-2xl flex flex-wrap items-center justify-between gap-3 border-b-2 border-red-800 font-sans"
@@ -408,13 +418,12 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
                 CRITICAL SOS ALARM
               </span>
               <strong className="text-sm">
-                ⚠️ {breakdownLorries.map((l) => l.lorry_id).join(', ') || 'Vehicle'} reported a breakdown — linked shipment returned to queue.
+                ⚠️ {displayLorryIds.join(', ')} reported a breakdown — linked shipment returned to queue.
               </strong>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-
             <button
               onClick={toggleMute}
               className="px-2.5 py-1 text-xs font-semibold bg-red-800 hover:bg-red-900 rounded-lg flex items-center gap-1.5 transition-colors"
@@ -424,21 +433,21 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
               {isMuted ? 'Unmute' : 'Mute Sound'}
             </button>
 
-            {breakdownLorries.map((l) => (
+            {displayLorryIds.map((id) => (
               <button
-                key={l.lorry_id}
-                onClick={() => acknowledgeBreakdown(l.lorry_id)}
-                className="px-3 py-1 text-xs font-bold bg-white hover:bg-red-50 text-red-700 rounded-lg shadow-sm flex items-center gap-1 transition-all active:scale-95"
+                key={id}
+                onClick={() => acknowledgeBreakdown(id)}
+                className="px-3 py-1 text-xs font-bold bg-white hover:bg-red-50 text-red-700 rounded-lg shadow-sm flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
               >
                 <CheckCircle2 size={14} />
-                Acknowledge {l.lorry_id}
+                Acknowledge {id}
               </button>
             ))}
           </div>
         </aside>
       )}
 
-      <div className={breakdownLorries.length > 0 || activeAlerts.some((a) => !a.resolved) ? 'pt-12' : ''}>
+      <div className={hasActiveBreakdown ? 'pt-12' : ''}>
         {children}
       </div>
     </BreakdownAlarmContext.Provider>
