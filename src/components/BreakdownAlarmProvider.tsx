@@ -312,6 +312,9 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
             is_breakdown: false,
             breakdown_at: null,
             status: 'active',
+            driver_available: true,
+            assignment_status: 'available',
+            current_shipment_id: null,
             updated_at: now,
           })
           .eq('lorry_id', lorryId),
@@ -320,6 +323,24 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
           .update({ resolved: true })
           .eq('lorry_id', lorryId),
       ]);
+
+      // Also update local Zustand state so the UI shows the change immediately
+      useStore.setState((state) => ({
+        lorries: state.lorries.map((l) =>
+          l.lorry_id === lorryId
+            ? {
+                ...l,
+                is_breakdown: false,
+                breakdown_at: null,
+                status: 'active' as const,
+                driver_available: true,
+                assignment_status: 'available' as const,
+                current_shipment_id: null,
+                updated_at: now,
+              }
+            : l
+        ),
+      }));
 
       setBreakdownLorries((prev) => prev.filter((l) => l.lorry_id !== lorryId));
       setActiveAlerts((prev) => prev.filter((a) => a.lorry_id !== lorryId));
