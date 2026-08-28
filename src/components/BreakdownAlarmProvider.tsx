@@ -416,14 +416,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={testSound}
-              className="px-2.5 py-1 text-xs font-semibold bg-white text-red-700 hover:bg-red-50 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
-              title="Test Siren Sound"
-            >
-              <Volume2 size={14} />
-              Test Sound
-            </button>
+
             <button
               onClick={toggleMute}
               className="px-2.5 py-1 text-xs font-semibold bg-red-800 hover:bg-red-900 rounded-lg flex items-center gap-1.5 transition-colors"

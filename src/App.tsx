@@ -216,13 +216,7 @@ function MainLayout({
               <Bell size={14} />
               Enable Push Alerts
             </button>
-            <button
-              onClick={testSound}
-              className="px-3 py-1.5 text-xs font-extrabold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md flex items-center gap-1.5 transition-transform active:scale-95 animate-pulse"
-              title="Click to test emergency siren sound"
-            >
-              🔊 TEST SIREN SOUND
-            </button>
+
             {currentResult && (
               <span className="text-xs text-gray-500 hidden sm:inline">
                 Last run: {new Date(currentResult.timestamp).toLocaleTimeString()}
