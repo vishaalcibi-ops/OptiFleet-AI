@@ -172,6 +172,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const lastSeenAlertTimeRef = useRef<number>(0);
+  const recentlyAcknowledgedRef = useRef<Set<string>>(new Set());
 
   // Synchronize breakdown lorries from store & listen to cross-tab BroadcastChannel
   useEffect(() => {
@@ -233,7 +234,10 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         }
 
         if (lorriesRes.data) {
-          setBreakdownLorries(lorriesRes.data as Lorry[]);
+          const freshLorries = lorriesRes.data as Lorry[];
+          // Filter out lorries that were just acknowledged locally to prevent UI flicker
+          const filtered = freshLorries.filter(l => !recentlyAcknowledgedRef.current.has(l.lorry_id));
+          setBreakdownLorries(filtered);
         }
       } catch (err) {
         console.warn('Breakdown polling error:', err);
@@ -304,6 +308,12 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
   // Acknowledge breakdown action
   const acknowledgeBreakdown = async (lorryId: string) => {
     const now = new Date().toISOString();
+
+    // Mark as recently acknowledged to prevent polling from recreating it immediately
+    recentlyAcknowledgedRef.current.add(lorryId);
+    setTimeout(() => {
+      recentlyAcknowledgedRef.current.delete(lorryId);
+    }, 15000); // 15 seconds is plenty of time for DB to sync
 
     // 1. Apply locally FIRST — always works, even offline / placeholder URL
     useStore.setState((state) => {
