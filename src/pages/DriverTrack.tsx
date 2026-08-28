@@ -163,24 +163,29 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
     if (!tokenInfo) return;
     setActionLoading(true);
     const now = new Date().toISOString();
+    const targetShipmentId = tokenInfo.shipmentId || lorry?.current_shipment_id || assignment?.shipment_id;
     try {
-      // 1. Try RPC driver_report_breakdown
-      const { error: rpcErr } = await supabase.rpc('driver_report_breakdown', { p_token: tokenInfo.token });
-
-      if (rpcErr) {
-        // Fallback updates if RPC is not compiled in DB yet
-        await Promise.all([
-          supabase.from('shipments').update({ shipment_status: 'unassigned', status: 'unassigned', assigned_lorry_id: null, assigned_driver_name: null, updated_at: now }).eq('shipment_id', tokenInfo.shipmentId),
-          supabase.from('lorries').update({ status: 'maintenance', assignment_status: 'available', is_breakdown: true, breakdown_at: now, current_shipment_id: null, updated_at: now }).eq('lorry_id', tokenInfo.lorryId),
-          supabase.from('driver_alerts').insert({ lorry_id: tokenInfo.lorryId, shipment_id: tokenInfo.shipmentId, alert_type: 'BREAKDOWN', message: `${tokenInfo.lorryId} reported a breakdown while carrying ${tokenInfo.shipmentId}. Shipment returned to queue.` }),
-          supabase.from('driver_tracking_links').update({ expired_at: now }).eq('tracking_token', tokenInfo.token),
-        ]);
-      }
+      // 1. Direct database updates to shipments, lorries, alerts, and tracking link
+      await Promise.all([
+        targetShipmentId
+          ? supabase.from('shipments').update({ shipment_status: 'unassigned', status: 'unassigned', assigned_lorry_id: null, assigned_driver_name: null, updated_at: now }).eq('shipment_id', targetShipmentId)
+          : supabase.from('shipments').update({ shipment_status: 'unassigned', status: 'unassigned', assigned_lorry_id: null, assigned_driver_name: null, updated_at: now }).eq('assigned_lorry_id', tokenInfo.lorryId),
+        supabase.from('lorries').update({ status: 'maintenance', assignment_status: 'available', current_shipment_id: null, updated_at: now }).eq('lorry_id', tokenInfo.lorryId),
+        supabase.from('driver_alerts').insert({
+          lorry_id: tokenInfo.lorryId,
+          shipment_id: targetShipmentId || null,
+          alert_type: 'BREAKDOWN',
+          message: `${tokenInfo.lorryId} reported a breakdown${targetShipmentId ? ` while carrying ${targetShipmentId}` : ''}. Shipment returned to queue.`,
+          resolved: false,
+          created_at: now,
+        }),
+        supabase.from('driver_tracking_links').update({ expired_at: now }).eq('tracking_token', tokenInfo.token),
+      ]);
 
       // Broadcast breakdown alert over Supabase Realtime & BroadcastChannel
       try {
         const bc = new BroadcastChannel('optifleet_alerts_channel');
-        bc.postMessage({ type: 'BREAKDOWN', lorryId: tokenInfo.lorryId, shipmentId: tokenInfo.shipmentId });
+        bc.postMessage({ type: 'BREAKDOWN', lorryId: tokenInfo.lorryId, shipmentId: targetShipmentId });
         bc.close();
       } catch {}
 
@@ -189,7 +194,7 @@ export function DriverTrack({ token: propToken }: DriverTrackProps) {
         void rtChannel.send({
           type: 'broadcast',
           event: 'breakdown',
-          payload: { lorryId: tokenInfo.lorryId, shipmentId: tokenInfo.shipmentId },
+          payload: { lorryId: tokenInfo.lorryId, shipmentId: targetShipmentId },
         });
       } catch {}
 

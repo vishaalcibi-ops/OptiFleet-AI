@@ -185,6 +185,23 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         if (event.data?.type === 'BREAKDOWN') {
           console.log('BroadcastChannel alert fired', event.data);
           triggerSirenSound();
+          const brokenLorryId = event.data?.lorryId;
+          const brokenShipmentId = event.data?.shipmentId;
+          if (brokenLorryId) {
+            useStore.setState((state) => {
+              const lorries = state.lorries.map((l) =>
+                l.lorry_id === brokenLorryId
+                  ? { ...l, status: 'maintenance' as const, driver_available: false, assignment_status: 'available' as const, current_shipment_id: null }
+                  : l
+              );
+              const shipments = state.shipments.map((s) =>
+                s.shipment_id === brokenShipmentId || s.assigned_lorry_id === brokenLorryId
+                  ? { ...s, shipment_status: 'unassigned' as const, status: 'unassigned' as const, assigned_lorry_id: null, assigned_driver_name: null }
+                  : s
+              );
+              return { lorries, shipments };
+            });
+          }
           void fetchData();
         }
       };
@@ -216,6 +233,35 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         if (alertsRes.data) {
           const freshAlerts = alertsRes.data as DriverAlert[];
           setActiveAlerts(freshAlerts);
+
+          // Update store for any active unresolved breakdown alerts
+          if (freshAlerts.length > 0) {
+            useStore.setState((state) => {
+              let changed = false;
+              let lorries = state.lorries;
+              let shipments = state.shipments;
+
+              for (const alert of freshAlerts) {
+                if (recentlyAcknowledgedRef.current.has(alert.lorry_id)) continue;
+                lorries = lorries.map((l) => {
+                  if (l.lorry_id === alert.lorry_id && (l.status !== 'maintenance' || l.driver_available)) {
+                    changed = true;
+                    return { ...l, status: 'maintenance' as const, driver_available: false, assignment_status: 'available' as const, current_shipment_id: null };
+                  }
+                  return l;
+                });
+                shipments = shipments.map((s) => {
+                  if ((s.shipment_id === alert.shipment_id || s.assigned_lorry_id === alert.lorry_id) && (s.shipment_status ?? s.status) !== 'unassigned') {
+                    changed = true;
+                    return { ...s, shipment_status: 'unassigned' as const, status: 'unassigned' as const, assigned_lorry_id: null, assigned_driver_name: null };
+                  }
+                  return s;
+                });
+              }
+
+              return changed ? { lorries, shipments } : state;
+            });
+          }
 
           const maxTime = freshAlerts.reduce((max, a) => {
             const t = new Date(a.created_at || 0).getTime();
@@ -253,6 +299,23 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
       .on('broadcast', { event: 'breakdown' }, (payload) => {
         console.log('Realtime broadcast breakdown received:', payload);
         triggerSirenSound();
+        const brokenLorryId = (payload as any)?.payload?.lorryId;
+        const brokenShipmentId = (payload as any)?.payload?.shipmentId;
+        if (brokenLorryId) {
+          useStore.setState((state) => {
+            const lorries = state.lorries.map((l) =>
+              l.lorry_id === brokenLorryId
+                ? { ...l, status: 'maintenance' as const, driver_available: false, assignment_status: 'available' as const, current_shipment_id: null }
+                : l
+            );
+            const shipments = state.shipments.map((s) =>
+              s.shipment_id === brokenShipmentId || s.assigned_lorry_id === brokenLorryId
+                ? { ...s, shipment_status: 'unassigned' as const, status: 'unassigned' as const, assigned_lorry_id: null, assigned_driver_name: null }
+                : s
+            );
+            return { lorries, shipments };
+          });
+        }
         void fetchData();
       })
       .on(
@@ -261,6 +324,22 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         (payload) => {
           console.log('driver_alerts postgres_changes fired:', payload);
           triggerSirenSound();
+          const newAlert = payload.new as DriverAlert | undefined;
+          if (newAlert && !newAlert.resolved && newAlert.lorry_id) {
+            useStore.setState((state) => {
+              const lorries = state.lorries.map((l) =>
+                l.lorry_id === newAlert.lorry_id
+                  ? { ...l, status: 'maintenance' as const, driver_available: false, assignment_status: 'available' as const, current_shipment_id: null }
+                  : l
+              );
+              const shipments = state.shipments.map((s) =>
+                s.shipment_id === newAlert.shipment_id || s.assigned_lorry_id === newAlert.lorry_id
+                  ? { ...s, shipment_status: 'unassigned' as const, status: 'unassigned' as const, assigned_lorry_id: null, assigned_driver_name: null }
+                  : s
+              );
+              return { lorries, shipments };
+            });
+          }
           void fetchData();
         }
       )
@@ -277,7 +356,7 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
         (payload) => {
           console.log('lorries postgres_changes fired:', payload);
           const newRow = payload.new as Lorry | undefined;
-          if (newRow?.is_breakdown || newRow?.status === 'maintenance') {
+          if (newRow?.status === 'maintenance') {
             triggerSirenSound();
           }
           void fetchData();

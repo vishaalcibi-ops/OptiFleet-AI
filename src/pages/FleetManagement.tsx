@@ -206,10 +206,12 @@ export function FleetManagement() {
                     <td className="px-4 py-3">
                        <div className="text-sm text-gray-300 font-semibold">{l.driver_name || 'Unassigned driver'}</div>
                        {l.driver_phone && <div className="text-xs text-gray-400 mt-0.5">{l.driver_phone}</div>}
-                        {l.assignment_status === 'assigned' ? (
+                        {isLorryInBreakdown ? (
+                          <span className="badge mt-1 bg-error-500/20 text-error-400 border border-error-500/30">Unavailable</span>
+                        ) : l.assignment_status === 'assigned' ? (
                           <span className="badge mt-1 bg-amber-500/20 text-amber-400 border border-amber-500/30">In Transit</span>
                         ) : (
-                          <span className={`badge mt-1 ${l.driver_available ? 'bg-success-500/20 text-success-400 border border-success-500/30' : 'bg-error-500/20 text-error-400 border border-error-500/30'}`}>{l.driver_available ? 'Available' : 'Unavailable'}</span>
+                          <span className={`badge mt-1 ${l.driver_available && l.status === 'active' ? 'bg-success-500/20 text-success-400 border border-success-500/30' : 'bg-error-500/20 text-error-400 border border-error-500/30'}`}>{l.driver_available && l.status === 'active' ? 'Available' : 'Unavailable'}</span>
                         )}
                     </td>
                     <td className="px-4 py-3 text-center">
