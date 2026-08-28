@@ -356,7 +356,6 @@ export function BreakdownAlarmProvider({ children }: { children: ReactNode }) {
               is_breakdown: false,
               breakdown_at: null,
               status: 'active',
-              driver_available: true,
               assignment_status: 'available',
               current_shipment_id: null,
               updated_at: now,
